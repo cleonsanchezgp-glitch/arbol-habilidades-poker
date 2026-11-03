@@ -380,6 +380,32 @@ class Store:
             raise StoreError("Prerequisite graph contains a cycle")
         return order
 
+    def learning_tree(self) -> dict[str, Any]:
+        """Build the current navigation graph from saved branches and topics."""
+        return {
+            "branches": self.list_branches(),
+            "topics": [self.get_topic(topic_id) for topic_id in self.ordered_topic_ids()],
+        }
+
+    def topic_locations(self, topic_id: str) -> dict[str, Any]:
+        self.get_topic(topic_id)
+        with self.read() as db:
+            branches = {row["id"]: dict(row) for row in db.execute("SELECT * FROM branches")}
+            placements = [row[0] for row in db.execute(
+                "SELECT branch_id FROM placements WHERE topic_id=?", (topic_id,)
+            )]
+        locations = []
+        for branch_id in placements:
+            path = []
+            current = branch_id
+            while current is not None:
+                branch = branches[current]
+                path.append({"id": current, "name": branch["name"]})
+                current = branch["parent_id"]
+            locations.append({"branch_id": branch_id, "path": list(reversed(path))})
+        locations.sort(key=lambda location: tuple(part["name"].casefold() for part in location["path"]))
+        return {"topic_id": topic_id, "locations": locations}
+
     def topics_for_document(self, document_id: str) -> list[dict[str, Any]]:
         self.get_document(document_id)
         with self.read() as db:
@@ -422,18 +448,80 @@ class Store:
             db.execute("INSERT INTO document_analysis(document_id,topic_count,completed_at) VALUES (?,?,?)", (document_id, len(created_ids), utc_now()))
         return [self.get_topic(topic_id) for topic_id in created_ids]
 
-    def update_topic(self, topic_id: str, data: dict[str, Any]) -> dict[str, Any]:
-        current = self.get_topic(topic_id)
-        values = self._topic_values(data, current)
-        values.update(id=topic_id, updated_at=utc_now())
+    @staticmethod
+    def _relation_ids(value: object, name: str) -> list[str]:
+        if not isinstance(value, list) or any(not isinstance(item, str) or not item for item in value):
+            raise StoreError(f"{name} must be a list of IDs")
+        if len(value) != len(set(value)):
+            raise StoreError(f"{name} contains duplicate IDs")
+        return value
+
+    @staticmethod
+    def _would_create_cycle(db: sqlite3.Connection, topic_id: str, prerequisite_id: str) -> bool:
+        return db.execute("""WITH RECURSIVE ancestors(id) AS (
+            SELECT prerequisite_id FROM prerequisites WHERE topic_id=?
+            UNION
+            SELECT p.prerequisite_id FROM prerequisites p JOIN ancestors a ON p.topic_id=a.id
+        ) SELECT 1 FROM ancestors WHERE id=? LIMIT 1""", (prerequisite_id, topic_id)).fetchone() is not None
+
+    def save_topic_edit(self, topic_id: str, data: dict[str, Any]) -> dict[str, Any]:
+        """Save content, facets and graph links as one validated transaction."""
+        relation_fields = {"facets", "placements", "prerequisites"}
+        unknown = set(data) - TOPIC_FIELDS - relation_fields
+        if unknown:
+            raise StoreError(f"Unknown topic fields: {', '.join(sorted(unknown))}")
+        if not data:
+            raise StoreError("Topic edit is empty")
+        topic_data = {name: value for name, value in data.items() if name in TOPIC_FIELDS}
+        facets = _normalise_facets(data["facets"]) if "facets" in data else None
+        placements = self._relation_ids(data["placements"], "placements") if "placements" in data else None
+        prerequisites = self._relation_ids(data["prerequisites"], "prerequisites") if "prerequisites" in data else None
         with self.transaction() as db:
-            db.execute("""UPDATE topics SET title=:title,summary=:summary,explanation=:explanation,
-                          conditions=:conditions,examples_json=:examples_json,visuals_json=:visuals_json,
-                          difficulty=:difficulty,tags_json=:tags_json,review_status=:review_status,
-                          claims_json=:claims_json,unknowns_json=:unknowns_json,
-                          contradictions_json=:contradictions_json,prerequisite_proposals_json=:prerequisite_proposals_json,
-                          updated_at=:updated_at WHERE id=:id""", values)
+            row = db.execute("SELECT * FROM topics WHERE id=?", (topic_id,)).fetchone()
+            if row is None:
+                raise StoreError("Topic not found")
+            if topic_data:
+                current = self._json_row(row, (
+                    "examples_json", "visuals_json", "tags_json", "claims_json",
+                    "unknowns_json", "contradictions_json", "prerequisite_proposals_json",
+                ))
+                values = self._topic_values(topic_data, current)
+                values.update(id=topic_id, updated_at=utc_now())
+                db.execute("""UPDATE topics SET title=:title,summary=:summary,explanation=:explanation,
+                              conditions=:conditions,examples_json=:examples_json,visuals_json=:visuals_json,
+                              difficulty=:difficulty,tags_json=:tags_json,review_status=:review_status,
+                              claims_json=:claims_json,unknowns_json=:unknowns_json,
+                              contradictions_json=:contradictions_json,prerequisite_proposals_json=:prerequisite_proposals_json,
+                              updated_at=:updated_at WHERE id=:id""", values)
+            if facets is not None:
+                db.execute("DELETE FROM facets WHERE topic_id=?", (topic_id,))
+                db.executemany("INSERT INTO facets(topic_id,name,value) VALUES (?,?,?)",
+                               [(topic_id, name, value) for name, value in facets.items()])
+            if placements is not None:
+                for branch_id in placements:
+                    if not db.execute("SELECT 1 FROM branches WHERE id=?", (branch_id,)).fetchone():
+                        raise StoreError("Branch not found")
+                db.execute("DELETE FROM placements WHERE topic_id=?", (topic_id,))
+                db.executemany("INSERT INTO placements(topic_id,branch_id) VALUES (?,?)",
+                               [(topic_id, branch_id) for branch_id in placements])
+            if prerequisites is not None:
+                for prerequisite_id in prerequisites:
+                    if prerequisite_id == topic_id:
+                        raise StoreError("A topic cannot require itself")
+                    if not db.execute("SELECT 1 FROM topics WHERE id=?", (prerequisite_id,)).fetchone():
+                        raise StoreError("Prerequisite not found")
+                db.execute("DELETE FROM prerequisites WHERE topic_id=?", (topic_id,))
+                for prerequisite_id in prerequisites:
+                    if self._would_create_cycle(db, topic_id, prerequisite_id):
+                        raise StoreError("Prerequisite would create a cycle")
+                    db.execute("INSERT INTO prerequisites(topic_id,prerequisite_id) VALUES (?,?)",
+                               (topic_id, prerequisite_id))
+            if not topic_data:
+                db.execute("UPDATE topics SET updated_at=? WHERE id=?", (utc_now(), topic_id))
         return self.get_topic(topic_id)
+
+    def update_topic(self, topic_id: str, data: dict[str, Any]) -> dict[str, Any]:
+        return self.save_topic_edit(topic_id, data)
 
     def set_facets(self, topic_id: str, facets: dict[str, str | None]) -> dict[str, Any]:
         normalised = _normalise_facets(facets)
@@ -488,12 +576,7 @@ class Store:
         with self.transaction() as db:
             if not db.execute("SELECT 1 FROM topics WHERE id=?", (topic_id,)).fetchone() or not db.execute("SELECT 1 FROM topics WHERE id=?", (prerequisite_id,)).fetchone():
                 raise StoreError("Topic or prerequisite not found")
-            cycle = db.execute("""WITH RECURSIVE ancestors(id) AS (
-                SELECT prerequisite_id FROM prerequisites WHERE topic_id=?
-                UNION
-                SELECT p.prerequisite_id FROM prerequisites p JOIN ancestors a ON p.topic_id=a.id
-            ) SELECT 1 FROM ancestors WHERE id=? LIMIT 1""", (prerequisite_id, topic_id)).fetchone()
-            if cycle:
+            if self._would_create_cycle(db, topic_id, prerequisite_id):
                 raise StoreError("Prerequisite would create a cycle")
             try:
                 db.execute("INSERT INTO prerequisites(topic_id,prerequisite_id) VALUES (?,?)", (topic_id, prerequisite_id))

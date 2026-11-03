@@ -157,6 +157,8 @@ class Handler(BaseHTTPRequestHandler):
                 return {"topics": store.list_topics()}
             if method == "POST":
                 return HTTPStatus.CREATED, store.create_topic(self._json())
+        if parts == ["api", "tree"] and method == "GET":
+            return store.learning_tree()
         if len(parts) >= 3 and parts[:2] == ["api", "topics"]:
             topic_id = parts[2]
             if len(parts) == 3:
@@ -164,6 +166,8 @@ class Handler(BaseHTTPRequestHandler):
                     return store.get_topic(topic_id)
                 if method == "PUT":
                     return store.update_topic(topic_id, self._json())
+            if len(parts) == 4 and parts[3] == "locations" and method == "GET":
+                return store.topic_locations(topic_id)
             if len(parts) == 4 and parts[3] == "facets" and method == "PUT":
                 return store.set_facets(topic_id, self._json())
             if len(parts) == 4 and parts[3] == "evidence" and method == "POST":

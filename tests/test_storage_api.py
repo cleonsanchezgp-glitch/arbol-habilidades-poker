@@ -150,6 +150,62 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(current["difficulty"], "basic")
         self.assertEqual(self.request("GET", "/api/health")[1]["status"], "ok")
 
+    def test_atomic_topic_edit_refreshes_tree_and_locations(self):
+        root = self.store.create_branch("Fundamentos")
+        child = self.store.create_branch("Postflop", root["id"])
+        other = self.store.create_branch("Defensa")
+        prerequisite = self.store.create_topic({"title": "Z conceptos", "difficulty": "advanced"})
+        topic = self.store.create_topic({"title": "A defensa", "difficulty": "basic"})
+
+        status, edited = self.request("PUT", f"/api/topics/{topic['id']}", {
+            "summary": "Defensa corregida", "difficulty": "intermediate",
+            "facets": {"street": "flop", "pot type": None},
+            "placements": [child["id"], other["id"]],
+            "prerequisites": [prerequisite["id"]],
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(edited["summary"], "Defensa corregida")
+        self.assertEqual(edited["facets"], {"street": "flop", "pot type": None})
+        self.assertEqual(set(edited["placements"]), {child["id"], other["id"]})
+        self.assertEqual(edited["prerequisites"], [prerequisite["id"]])
+        tree = self.request("GET", "/api/tree")[1]
+        self.assertEqual([item["id"] for item in tree["topics"]], [prerequisite["id"], topic["id"]])
+        locations = self.request("GET", f"/api/topics/{topic['id']}/locations")[1]["locations"]
+        self.assertEqual({tuple(part["name"] for part in location["path"]) for location in locations},
+                         {("Fundamentos", "Postflop"), ("Defensa",)})
+        self.assertEqual(Store(self.store.data_dir).get_topic(topic["id"])["summary"], "Defensa corregida")
+
+        status, error = self.request("PUT", f"/api/topics/{prerequisite['id']}", {
+            "summary": "Must roll back", "facets": {"street": "turn"},
+            "placements": [root["id"]], "prerequisites": [topic["id"]],
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("cycle", error["error"])
+        unchanged = self.store.get_topic(prerequisite["id"])
+        self.assertEqual(unchanged["summary"], "")
+        self.assertEqual(unchanged["facets"], {})
+        self.assertEqual(unchanged["placements"], [])
+        self.assertEqual(unchanged["prerequisites"], [])
+
+        status, error = self.request("PUT", f"/api/topics/{topic['id']}", {
+            "summary": "Must also roll back", "placements": ["missing-branch"],
+        })
+        self.assertEqual(status, 404)
+        self.assertIn("Branch not found", error["error"])
+        self.assertEqual(self.store.get_topic(topic["id"])["summary"], "Defensa corregida")
+
+        status, corrected = self.request("PUT", f"/api/topics/{topic['id']}", {
+            "difficulty": "advanced", "facets": {"street": "turn"},
+            "placements": [other["id"]], "prerequisites": [],
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(corrected["facets"], {"street": "turn"})
+        self.assertEqual(corrected["placements"], [other["id"]])
+        self.assertEqual(corrected["prerequisites"], [])
+        self.assertEqual(self.request("GET", f"/api/topics/{topic['id']}/locations")[1]["locations"][0]["path"],
+                         [{"id": other["id"], "name": "Defensa"}])
+        self.assertEqual(self.request("GET", "/api/tree")[1]["topics"][0]["id"], topic["id"])
+
     def test_document_upload_and_original_download(self):
         original = sample_docx()
         upload = Request(

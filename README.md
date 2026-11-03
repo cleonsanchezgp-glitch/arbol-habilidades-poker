@@ -31,14 +31,16 @@ Run a compatible model service on `http://127.0.0.1:11434`, or set `POKER_ROOTS_
 | GET | `/api/documents/{id}/images/{image_name}` | View an extracted image referenced by a fragment |
 | POST | `/api/documents/{id}/retry` | Retry failed extraction or topic analysis |
 | GET, POST | `/api/topics` | List or create structured topics |
-| GET, PUT | `/api/topics/{id}` | Read or edit a topic |
+| GET, PUT | `/api/topics/{id}` | Read or atomically edit topic fields, facets, placements, and prerequisites |
+| GET | `/api/topics/{id}/locations` | Return every branch path where the topic appears |
 | PUT | `/api/topics/{id}/facets` | Replace its strategic facets, using `null` for unknown |
 | POST | `/api/topics/{id}/evidence` | Link a source fragment to a topic |
 | GET, POST | `/api/branches` | Read or create navigation branches |
+| GET | `/api/tree` | Read the current branches and topics in prerequisite order |
 | POST, DELETE | `/api/topics/{id}/placements[/{branch_id}]` | Add or remove a branch placement |
 | POST, DELETE | `/api/topics/{id}/prerequisites[/{prerequisite_id}]` | Add or remove a prerequisite; cycles are rejected |
 
-The upload endpoint validates the DOCX package and responds `202 Accepted` with a document ID. Poll `/api/documents/{id}` until its state is `completed`, `awaiting_model`, or `failed`. `completed` means source-backed topic proposals were stored; `awaiting_model` means extraction succeeded but model configuration is missing. Exact duplicate bytes return the earlier document instead of creating another copy. Extraction preserves paragraphs and tables in body order and saves supported inline images. It reports omitted headers, footnotes, image text, complex layouts, and unsupported blocks as warnings where detected. The original DOCX remains available for inspection. Model proposals carry per-claim fragment links, unknowns, contradiction reports, example origin, and prerequisite suggestions. Exact duplicates are blocked by document hash; similar existing topics are flagged for review. These checks do not establish semantic fidelity of a real model output. JSON endpoints accept `Content-Type: application/json`. The server binds to `127.0.0.1` by default; exposing it on another interface would require an access-control design.
+The upload endpoint validates the DOCX package and responds `202 Accepted` with a document ID. Poll `/api/documents/{id}` until its state is `completed`, `awaiting_model`, or `failed`. `completed` means source-backed topic proposals were stored; `awaiting_model` means extraction succeeded but model configuration is missing. Exact duplicate bytes return the earlier document instead of creating another copy. Extraction preserves paragraphs and tables in body order and saves supported inline images. It reports omitted headers, footnotes, image text, complex layouts, and unsupported blocks as warnings where detected. The original DOCX remains available for inspection. Model proposals carry per-claim fragment links, unknowns, contradiction reports, example origin, and prerequisite suggestions. Exact duplicates are blocked by document hash; similar existing topics are flagged for review. These checks do not establish semantic fidelity of a real model output. JSON endpoints accept `Content-Type: application/json`. A topic `PUT` can include `facets` as a name-to-text-or-null map and `placements` and `prerequisites` as complete lists of IDs; all supplied changes commit together or none do. `/api/tree` is read from the saved graph after each edit, and `/api/topics/{id}/locations` gives each root-to-branch path for navigation. The server binds to `127.0.0.1` by default; exposing it on another interface would require an access-control design.
 
 ## Checks
 
