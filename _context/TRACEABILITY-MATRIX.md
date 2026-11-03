@@ -6,16 +6,16 @@
 | Initiative | INI-001 / PRJ-001 |
 | Version | 0.1 |
 | Status | Derived projection - for review |
-| Author | Vestigator (generated from authoritative Markdown) |
+| Author | Vestigator (refreshed from declared authorities) |
 | Reviewers | Project owner |
 | Organization | Aelium |
-| Last Updated | 2026-10-31 |
+| Last Updated | 2026-11-03 |
 
 ## 1. Purpose
 
-This matrix projects relationships from the project's Specification, Design, Planning, Time, and Verification documents. It is not the authority for their content or execution status. No `_context/MANAGEMENT-MODEL.yaml` exists, so the backward-compatible `classic` vocabulary and Markdown authorities are assumed. Verification execution is external; all linked tests are currently `Not Run` and have no evidence.
+This matrix projects relationships from the project's Specification, Design, Planning, Time, and Verification authorities. It is not the authority for their content or execution status. `_context/MANAGEMENT-MODEL.yaml` declares the `classic` vocabulary, Markdown Specification/Design/Verification definition, and GitHub Planning/Time in Project #6. The 26 GitHub Issues retain the confirmed INI → PRJ → WP → TSK hierarchy and requirement links; the local Planning and Roadmap Markdown are historical migration sources. Verification execution is external; all linked tests are currently `Not Run` and have no evidence.
 
-Source counts: 6 objectives, 11 business requirements, 20 functional requirements, 9 quality requirements, 31 acceptance criteria, 7 decisions, 6 work packages, 18 tasks, and 21 planned tests. Roadmap authority: `_context/_time/ROADMAP.md`, horizon H-001 and milestone MS-001, with no committed date.
+Source counts: 6 objectives, 11 business requirements, 20 functional requirements, 9 quality requirements, 31 acceptance criteria, 7 decisions, 6 GitHub work packages, 18 GitHub tasks, and 21 planned tests. GitHub time authority: horizon H-001 on all 26 Project items and milestone MS-001 on all 26 Issues, with no committed date. Refreshed against the live Project on 2026-11-03; no matrix rows were added or removed.
 
 ## 2. ID Prefix Registry
 
@@ -124,7 +124,7 @@ The selected `classic` profile uses these identifiers. The target does not decla
 | 3 | Orphan task | None; all task-bearing work packages have a Realizes relation. |
 | 4 | Requirement modified after verification | Unknown; no execution evidence or trustworthy evidence dates exist. |
 | 5 | NFR with no evidence | All 9 NFRs; tests are Not Run. |
-| 6 | Work closed but requirement still open | None; no Work Package is marked Done. |
+| 6 | Work closed but requirement still open | WP-001 is marked Done in GitHub, while its linked tests remain Not Run; implementation status does not establish verification. |
 
 Additional bidirectional findings:
 
@@ -141,6 +141,6 @@ Additional bidirectional findings:
 
 - `_context/VSD.md`, `_context/_specification/BRD.md`, `_context/_specification/FRDs/*.md`, and `_context/_specification/NFRD.md` — Specification.
 - `_context/_design/ADD.md` — Design.
-- `_context/_planning/INI-001-texas-holdem-learning-library.md`, `PRJ-001-local-mvp.md`, and `WP-*.md` — Planning.
-- `_context/_time/ROADMAP.md` — Time.
+- GitHub Project [Poker Roots Development Planning](https://github.com/users/cleonsanchezgp-glitch/projects/6) and repository Issues #1–#26 — Planning and Time authority; milestone [MS-001](https://github.com/cleonsanchezgp-glitch/arbol-habilidades-poker/milestone/1).
+- `_context/_planning/INI-001-texas-holdem-learning-library.md`, `PRJ-001-local-mvp.md`, `WP-*.md`, and `_context/_time/ROADMAP.md` — retained migration sources, no longer live authority.
 - `_context/_verification/TMP.md` — Verification definition; execution evidence remains external.

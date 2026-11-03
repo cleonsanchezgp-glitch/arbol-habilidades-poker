@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import heapq
 import json
 import os
 import re
@@ -17,6 +18,19 @@ from typing import Any, Iterator
 
 DIFFICULTIES = {"basic", "intermediate", "advanced"}
 TOPIC_FIELDS = {"title", "summary", "explanation", "conditions", "examples", "visuals", "difficulty", "tags", "review_status", "claims", "unknowns", "contradictions", "prerequisite_proposals"}
+
+
+def _normalise_facets(facets: dict[str, str | None]) -> dict[str, str | None]:
+    if not isinstance(facets, dict) or any(
+        not isinstance(name, str) or not name.strip() or
+        (value is not None and not isinstance(value, str))
+        for name, value in facets.items()
+    ):
+        raise StoreError("Facets must be a map of names to text or null")
+    normalised = {name.strip(): value for name, value in facets.items()}
+    if len(normalised) != len(facets):
+        raise StoreError("Facet names must be unique after trimming spaces")
+    return normalised
 
 
 def _similarity(left: str, right: str) -> float:
@@ -342,6 +356,30 @@ class Store:
             topic_ids = [row[0] for row in db.execute("SELECT id FROM topics ORDER BY title COLLATE NOCASE, id")]
         return [self.get_topic(topic_id) for topic_id in topic_ids]
 
+    def ordered_topic_ids(self) -> list[str]:
+        """Return prerequisites before their dependents, independent of difficulty."""
+        with self.read() as db:
+            topics = {row["id"]: row["title"] for row in db.execute("SELECT id,title FROM topics")}
+            edges = db.execute("SELECT topic_id,prerequisite_id FROM prerequisites").fetchall()
+        remaining = {topic_id: 0 for topic_id in topics}
+        dependents = {topic_id: [] for topic_id in topics}
+        for edge in edges:
+            remaining[edge["topic_id"]] += 1
+            dependents[edge["prerequisite_id"]].append(edge["topic_id"])
+        ready = [(topics[topic_id].casefold(), topic_id) for topic_id, count in remaining.items() if count == 0]
+        heapq.heapify(ready)
+        order = []
+        while ready:
+            _, topic_id = heapq.heappop(ready)
+            order.append(topic_id)
+            for dependent_id in dependents[topic_id]:
+                remaining[dependent_id] -= 1
+                if remaining[dependent_id] == 0:
+                    heapq.heappush(ready, (topics[dependent_id].casefold(), dependent_id))
+        if len(order) != len(topics):
+            raise StoreError("Prerequisite graph contains a cycle")
+        return order
+
     def topics_for_document(self, document_id: str) -> list[dict[str, Any]]:
         self.get_document(document_id)
         with self.read() as db:
@@ -366,9 +404,7 @@ class Store:
                 source_ids = proposal.get("source_fragment_ids")
                 if not isinstance(source_ids, list) or not source_ids or any(source_id not in valid_fragments for source_id in source_ids):
                     raise StoreError("Every proposed topic needs valid source fragments from its document")
-                facets = proposal.get("facets", {})
-                if not isinstance(facets, dict) or any(not isinstance(key, str) or not key.strip() or (value is not None and not isinstance(value, str)) for key, value in facets.items()):
-                    raise StoreError("Invalid proposed facets")
+                facets = _normalise_facets(proposal.get("facets", {}))
                 values = self._topic_values({key: value for key, value in proposal.items() if key in TOPIC_FIELDS})
                 topic_id = uuid.uuid4().hex
                 values.update(id=topic_id, created_at=utc_now(), updated_at=utc_now())
@@ -377,7 +413,7 @@ class Store:
                 for source_id in set(source_ids):
                     db.execute("INSERT INTO topic_evidence(topic_id,fragment_id,role) VALUES (?,?,?)", (topic_id, source_id, "supports"))
                 for name, value in facets.items():
-                    db.execute("INSERT INTO facets(topic_id,name,value) VALUES (?,?,?)", (topic_id, name.strip(), value))
+                    db.execute("INSERT INTO facets(topic_id,name,value) VALUES (?,?,?)", (topic_id, name, value))
                 for candidate_id, title, summary in existing:
                     score = _similarity(values["title"] + " " + values["summary"], title + " " + summary)
                     if score >= 0.55:
@@ -400,13 +436,12 @@ class Store:
         return self.get_topic(topic_id)
 
     def set_facets(self, topic_id: str, facets: dict[str, str | None]) -> dict[str, Any]:
-        if not isinstance(facets, dict) or any(not isinstance(name, str) or not name.strip() or (value is not None and not isinstance(value, str)) for name, value in facets.items()):
-            raise StoreError("Facets must be a map of names to text or null")
+        normalised = _normalise_facets(facets)
         with self.transaction() as db:
             if not db.execute("SELECT 1 FROM topics WHERE id=?", (topic_id,)).fetchone():
                 raise StoreError("Topic not found")
             db.execute("DELETE FROM facets WHERE topic_id=?", (topic_id,))
-            db.executemany("INSERT INTO facets(topic_id,name,value) VALUES (?,?,?)", [(topic_id, name.strip(), value) for name, value in facets.items()])
+            db.executemany("INSERT INTO facets(topic_id,name,value) VALUES (?,?,?)", [(topic_id, name, value) for name, value in normalised.items()])
         return self.get_topic(topic_id)
 
     def link_evidence(self, topic_id: str, fragment_id: str, role: str = "supports") -> dict[str, Any]:

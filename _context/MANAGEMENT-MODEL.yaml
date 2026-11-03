@@ -1,0 +1,32 @@
+version: 1
+
+management_model:
+  semantic_model: qualitas-lifecycle
+  contract_version: "1.3.0"
+  vocabulary_profile: classic
+  design_layout: legacy-add
+  verification_layout: tmp
+
+qualitas_adoption:
+  last_applied_toolkit: null
+
+authorities:
+  specification: markdown
+  design: markdown
+  planning: github
+  time: github
+  verification_definition: markdown
+  verification_execution: external
+
+backend_configuration:
+  github:
+    owner: cleonsanchezgp-glitch
+    repository: arbol-habilidades-poker
+    project_number: 6
+
+language:
+  documentation: en
+  terminology: formal
+
+migration:
+  aliases: []

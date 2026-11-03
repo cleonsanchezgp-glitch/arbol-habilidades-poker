@@ -79,6 +79,35 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(self.store.get_topic(root["id"])["prerequisites"], [])
         self.assertEqual(self.store.get_topic(advanced["id"])["prerequisites"], [root["id"]])
 
+    def test_facets_difficulty_and_multiple_placements_survive_restart(self):
+        topic = self.store.create_topic({"title": "Defensa BB", "difficulty": "intermediate"})
+        self.store.set_facets(topic["id"], {" street ": "flop", "pot type": None})
+        first = self.store.create_branch("Defensa")
+        second = self.store.create_branch("Juego postflop")
+        self.store.place_topic(topic["id"], first["id"])
+        self.store.place_topic(topic["id"], second["id"])
+
+        with self.assertRaisesRegex(StoreError, "unique"):
+            self.store.set_facets(topic["id"], {"street": "turn", " street ": "river"})
+        reopened = Store(self.path).get_topic(topic["id"])
+        self.assertEqual(reopened["facets"], {"street": "flop", "pot type": None})
+        self.assertEqual(set(reopened["placements"]), {first["id"], second["id"]})
+        self.assertEqual(reopened["difficulty"], "intermediate")
+        self.assertEqual(reopened["prerequisites"], [])
+
+    def test_learning_order_respects_dependencies_without_using_difficulty(self):
+        prerequisite = self.store.create_topic({"title": "Z concepto previo", "difficulty": "advanced"})
+        dependent = self.store.create_topic({"title": "A aplicación", "difficulty": "basic"})
+        unrelated = self.store.create_topic({"title": "B independiente", "difficulty": "intermediate"})
+        self.store.add_prerequisite(dependent["id"], prerequisite["id"])
+
+        order = Store(self.path).ordered_topic_ids()
+        self.assertEqual(set(order), {prerequisite["id"], dependent["id"], unrelated["id"]})
+        self.assertLess(order.index(prerequisite["id"]), order.index(dependent["id"]))
+        with self.assertRaisesRegex(StoreError, "cycle"):
+            self.store.add_prerequisite(prerequisite["id"], dependent["id"])
+        self.assertEqual(self.store.ordered_topic_ids(), order)
+
 
 class ApiTests(unittest.TestCase):
     def setUp(self):
