@@ -15,6 +15,7 @@ from backend.docx_extract import extract_docx
 from backend.imports import ImportService
 from backend.local_model import LocalModel, ModelUnavailable
 from backend.retrieval_index import RetrievalIndexer
+from backend.search import SearchFailure, SearchService
 from backend.topic_processor import TopicProcessor
 from backend.storage import Store, StoreError
 
@@ -244,6 +245,32 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(index["entries"], 1)
         self.assertEqual(index["pending"], 1)
 
+    def test_search_reports_local_model_unavailable(self):
+        self.store.create_topic({"title": "Rangos", "difficulty": "basic"})
+        status, result = self.request("POST", "/api/search", {"query": "¿Qué rangos?"})
+        self.assertEqual(status, 503)
+        self.assertEqual(result["status"], "model_unavailable")
+        self.assertEqual(self.store.list_topics()[0]["title"], "Rangos")
+
+    def test_search_api_returns_fragment_link(self):
+        document, _ = self.store.save_document("lesson.docx", b"source")
+        fragment = self.store.add_fragments(document["id"], [
+            {"kind": "paragraph", "locator": "p1", "content": "BB vs BTN en flop Axx tras open"},
+        ])[0]
+        topic = self.store.create_topic({"title": "BB vs BTN", "difficulty": "basic"})
+        self.store.link_evidence(topic["id"], fragment["id"])
+        model = SearchTests.Model()
+        self.server.search.model = model
+        status, result = self.request("POST", "/api/search", {"query": "BB vs BTN tras open"})
+        self.assertEqual(status, 200)
+        self.assertEqual(result["status"], "answered")
+        self.assertEqual(result["source_fragment_ids"], [fragment["id"]])
+        self.assertEqual(result["sources"][0]["document_id"], document["id"])
+        model.invalid_refs = True
+        status, result = self.request("POST", "/api/search", {"query": "BB vs BTN tras open"})
+        self.assertEqual(status, 502)
+        self.assertEqual(result["status"], "search_failed")
+
     def test_atomic_topic_edit_refreshes_tree_and_locations(self):
         root = self.store.create_branch("Fundamentos")
         child = self.store.create_branch("Postflop", root["id"])
@@ -370,6 +397,102 @@ class LocalModelTests(unittest.TestCase):
             request = build.return_value.open.call_args.args[0]
             self.assertEqual(request.full_url, "http://127.0.0.1:11434/api/embed")
             self.assertEqual(json.loads(request.data), {"model": "test-embedding", "input": "Flop Axx"})
+
+
+class SearchTests(unittest.TestCase):
+    class Model:
+        embedding_name = ""
+        configured = True
+        invalid_refs = False
+        unsupported_number = False
+        insufficient = False
+
+        def embed(self, content):
+            return [1.0, 0.0]
+
+        def generate_json(self, system, prompt):
+            if "Interpreta la pregunta" in system:
+                query = json.loads(prompt)["query"]
+                if "sin datos" in query:
+                    return {"terms": ["inexistente"], "facets": {}}
+                return {"terms": ["BB", "BTN", "Axx"],
+                        "facets": {"preflop_action": "open"} if "tras open" in query else {}}
+            if self.invalid_refs:
+                return {"answer": "Tras open, continuar.", "source_refs": ["F99"], "insufficient": False}
+            if self.unsupported_number:
+                return {"answer": "Apostar 75% del bote.", "source_refs": ["F1"], "insufficient": False}
+            if self.insufficient:
+                return {"insufficient": True}
+            return {"answer": json.loads(prompt)["fragments"][0]["content"],
+                    "source_refs": ["F1"], "insufficient": False}
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.store = Store(Path(self.temp.name))
+        self.model = self.Model()
+        self.service = SearchService(self.store, self.model)
+
+    def _sourced_topic(self, document, title, content, action, condition):
+        fragment = self.store.add_fragments(document["id"], [
+            {"kind": "paragraph", "locator": title, "content": content},
+        ])[0]
+        topic = self.store.create_topic({"title": title, "summary": "BB vs BTN en flop Axx",
+                                         "conditions": condition, "difficulty": "basic"})
+        self.store.link_evidence(topic["id"], fragment["id"])
+        self.store.set_facets(topic["id"], {"preflop_action": action})
+        return topic, fragment
+
+    def test_ambiguity_then_grounded_answer_with_source_and_tree_path(self):
+        document, _ = self.store.save_document("lesson.docx", b"source")
+        branch = self.store.create_branch("Postflop")
+        open_topic, open_fragment = self._sourced_topic(
+            document, "BB vs BTN open", "Tras open del BTN, BB juega flop Axx.", "open", "Tras open del BTN")
+        self._sourced_topic(document, "BB vs BTN 3bet", "Tras 3bet, BB juega flop Axx.", "3bet", "Tras 3bet")
+        self.store.place_topic(open_topic["id"], branch["id"])
+
+        ambiguous = self.service.search({"query": "BB vs BTN en Axx"})
+        self.assertEqual(ambiguous["status"], "clarification")
+        self.assertEqual(ambiguous["options"], ["3bet", "open"])
+        answer = self.service.search({"query": "BB vs BTN en Axx tras open"})
+        self.assertEqual(answer["status"], "answered")
+        self.assertEqual(answer["source_fragment_ids"], [open_fragment["id"]])
+        self.assertEqual([source["id"] for source in answer["sources"]], [open_fragment["id"]])
+        self.assertEqual(answer["conditions"][0]["text"], "Tras open del BTN")
+        self.assertEqual(answer["topics"][0]["locations"][0]["path"][0]["name"], "Postflop")
+
+    def test_empty_index_no_matches_and_invalid_citations_are_distinct(self):
+        self.assertEqual(self.service.search({"query": "BB vs BTN"})["status"], "empty_index")
+        document, _ = self.store.save_document("lesson.docx", b"source")
+        self._sourced_topic(document, "BB vs BTN", "Tras open, flop Axx.", "open", "Tras open")
+        missing = self.service.search({"query": "sin datos"})
+        self.assertEqual((missing["status"], missing["reason"]), ("insufficient_coverage", "no_matches"))
+        self.model.invalid_refs = True
+        with self.assertRaisesRegex(SearchFailure, "source references"):
+            self.service.search({"query": "BB vs BTN tras open"})
+        self.model.invalid_refs = False
+        self.model.unsupported_number = True
+        with self.assertRaisesRegex(SearchFailure, "unsupported numeric"):
+            self.service.search({"query": "BB vs BTN tras open"})
+        self.model.unsupported_number = False
+        self.model.insufficient = True
+        self.assertEqual(self.service.search({"query": "BB vs BTN tras open"})["reason"],
+                         "model_found_no_support")
+
+    def test_semantic_match_can_retrieve_source_when_terms_do_not_match(self):
+        document, _ = self.store.save_document("lesson.docx", b"source")
+        fragment = self.store.add_fragments(document["id"], [
+            {"kind": "paragraph", "locator": "p1", "content": "Defensa de ciega grande"},
+        ])[0]
+        topic = self.store.create_topic({"title": "Defensa", "difficulty": "basic"})
+        self.store.link_evidence(topic["id"], fragment["id"])
+        for entry in self.store.pending_embeddings("test"):
+            self.store.save_embedding(entry["id"], entry["content"], "test", [1.0, 0.0])
+        self.model.embedding_name = "test"
+        result = self.service.search({"query": "BB vs BTN"})
+        self.assertEqual(result["status"], "answered")
+        self.assertEqual(result["source_fragment_ids"], [fragment["id"]])
+        self.assertEqual(result["retrieval_warnings"], [])
 
 
 class FakeModel:

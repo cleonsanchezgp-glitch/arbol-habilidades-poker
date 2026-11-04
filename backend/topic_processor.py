@@ -18,7 +18,7 @@ Separa cada tema real. Cada párrafo explicativo y condición debe citar los ide
 Marca los ejemplos inventados solo como didácticos con origin=generated; no los presentes como fuente.
 Responde solo un objeto JSON con la estructura pedida. No agregues contenido que no pueda revisarse contra los fragmentos."""
 
-FACET_NAMES = ("street", "hero_position", "villain_position", "pot_type", "in_position", "board_texture", "concept")
+FACET_NAMES = ("street", "hero_position", "villain_position", "pot_type", "preflop_action", "in_position", "board_texture", "concept")
 NUMBER_PATTERN = re.compile(r"\b\d+(?:[.,]\d+)?\s*(?:%|bb\b|x\s*(?:pot|bote)\b)", re.IGNORECASE)
 MAX_CHUNK_CHARS = 12_000
 
@@ -77,7 +77,7 @@ def _windows(fragments: list[dict]) -> list[tuple[str, dict[str, dict]]]:
         prompt = "Propón uno o varios temas distintos de estos fragmentos:\n" + "\n\n".join(prompt_fragments)
         prompt += """
 
-Devuelve JSON: {"topics":[{"title":"...","summary":"...","explanation_blocks":[{"text":"...","source_refs":["F1"]}],"conditions":[{"text":"...","source_refs":["F1"]}],"examples":[{"text":"...","origin":"generated","source_refs":[]}],"visuals":[],"difficulty":"basic|intermediate|advanced","tags":[],"facets":{"street":null,"hero_position":null,"villain_position":null,"pot_type":null,"in_position":null,"board_texture":null,"concept":null},"unknowns":[],"contradictions":[],"prerequisite_proposals":[],"source_refs":["F1"]}]}.
+Devuelve JSON: {"topics":[{"title":"...","summary":"...","explanation_blocks":[{"text":"...","source_refs":["F1"]}],"conditions":[{"text":"...","source_refs":["F1"]}],"examples":[{"text":"...","origin":"generated","source_refs":[]}],"visuals":[],"difficulty":"basic|intermediate|advanced","tags":[],"facets":{"street":null,"hero_position":null,"villain_position":null,"pot_type":null,"preflop_action":null,"in_position":null,"board_texture":null,"concept":null},"unknowns":[],"contradictions":[],"prerequisite_proposals":[],"source_refs":["F1"]}]}.
 Cada explanation_block y condición requiere source_refs no vacío. Los ejemplos generados tienen origin=generated y source_refs vacío; si un ejemplo procede de la fuente, usa origin=source y cítala. Las propuestas de prerrequisito son texto para revisar, no enlaces automáticos. Si no hay teoría suficiente, devuelve topics=[]."""
         result.append((prompt, labels))
     return result

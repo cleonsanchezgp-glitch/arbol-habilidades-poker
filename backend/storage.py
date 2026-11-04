@@ -416,6 +416,30 @@ class Store:
         with self.read() as db:
             return [dict(row) for row in db.execute("SELECT * FROM fragments WHERE document_id=? ORDER BY ordinal", (document_id,))]
 
+    def fragments_by_ids(self, fragment_ids: list[str]) -> list[dict[str, Any]]:
+        if not fragment_ids:
+            return []
+        with self.read() as db:
+            placeholders = ",".join("?" for _ in fragment_ids)
+            return [dict(row) for row in db.execute(
+                f"SELECT id,document_id,ordinal,kind,locator,content FROM fragments WHERE id IN ({placeholders}) ORDER BY document_id,ordinal",
+                fragment_ids)]
+
+    def topic_ids_for_fragments(self, fragment_ids: list[str], grouped: bool = False) -> list[str] | dict[str, list[str]]:
+        if not fragment_ids:
+            return {} if grouped else []
+        with self.read() as db:
+            placeholders = ",".join("?" for _ in fragment_ids)
+            rows = db.execute(
+                f"SELECT DISTINCT fragment_id,topic_id FROM topic_evidence WHERE fragment_id IN ({placeholders}) ORDER BY fragment_id,topic_id",
+                fragment_ids).fetchall()
+        if grouped:
+            result: dict[str, list[str]] = {}
+            for row in rows:
+                result.setdefault(row["fragment_id"], []).append(row["topic_id"])
+            return result
+        return list(dict.fromkeys(row["topic_id"] for row in rows))
+
     def image_path(self, document_id: str, image_name: str) -> Path:
         with self.read() as db:
             exists = db.execute("SELECT 1 FROM fragments WHERE document_id=? AND image_name=? AND kind='image'", (document_id, image_name)).fetchone()

@@ -11,8 +11,9 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .imports import ImportService
-from .local_model import LocalModel
+from .local_model import LocalModel, ModelUnavailable
 from .retrieval_index import RetrievalIndexer
+from .search import SearchFailure, SearchService
 from .storage import Store, StoreError
 
 
@@ -30,6 +31,7 @@ class PokerRootsServer(ThreadingHTTPServer):
         selected_model = model or LocalModel()
         self.indexer = RetrievalIndexer(store, selected_model)
         self.imports = ImportService(store, selected_model, self.indexer)
+        self.search = SearchService(store, selected_model)
 
     def server_close(self) -> None:
         self.imports.close()
@@ -98,7 +100,7 @@ class Handler(BaseHTTPRequestHandler):
     def _handle(self, method: str) -> None:
         try:
             result = self._route(method, self._segments())
-            if method in {"POST", "PUT", "DELETE"}:
+            if method in {"POST", "PUT", "DELETE"} and self._segments() != ["api", "search"]:
                 self.server.indexer.schedule()
             if result is SENT_FILE:
                 return
@@ -108,6 +110,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._respond(result[0], result[1])
             else:
                 self._respond(HTTPStatus.OK, result)
+        except ModelUnavailable as exc:
+            self._respond(HTTPStatus.SERVICE_UNAVAILABLE, {"error": str(exc), "status": "model_unavailable"})
+        except SearchFailure as exc:
+            self._respond(HTTPStatus.BAD_GATEWAY, {"error": str(exc), "status": "search_failed"})
         except StoreError as exc:
             status = HTTPStatus.NOT_FOUND if "not found" in str(exc).lower() else HTTPStatus.BAD_REQUEST
             self._respond(status, {"error": str(exc)})
@@ -130,6 +136,8 @@ class Handler(BaseHTTPRequestHandler):
         store = self.server.store
         if parts == ["api", "health"] and method == "GET":
             return {"status": "ok", "database_version": 3, "model_configured": self.server.imports.model.configured}
+        if parts == ["api", "search"] and method == "POST":
+            return self.server.search.search(self._json())
         if parts == ["api", "index", "status"] and method == "GET":
             return store.index_status(getattr(self.server.indexer.model, "embedding_name", ""))
         if parts == ["api", "index", "retry"] and method == "POST":
