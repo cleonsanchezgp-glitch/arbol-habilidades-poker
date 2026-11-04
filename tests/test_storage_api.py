@@ -6,12 +6,15 @@ import time
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from backend.api import PokerRootsServer
 from backend.docx_extract import extract_docx
 from backend.imports import ImportService
+from backend.local_model import LocalModel, ModelUnavailable
+from backend.retrieval_index import RetrievalIndexer
 from backend.topic_processor import TopicProcessor
 from backend.storage import Store, StoreError
 
@@ -108,13 +111,99 @@ class StorageTests(unittest.TestCase):
             self.store.add_prerequisite(prerequisite["id"], dependent["id"])
         self.assertEqual(self.store.ordered_topic_ids(), order)
 
+    def test_lexical_index_tracks_fragments_topics_edits_and_replacement(self):
+        document, _ = self.store.save_document("lesson.docx", b"source")
+        fragment = self.store.add_fragments(document["id"], [
+            {"kind": "paragraph", "locator": "p1", "content": "Defensa ciega grande"},
+        ])[0]
+        topic = self.store.create_topic({"title": "Defensa BB", "summary": "Flop Axx", "difficulty": "basic"})
+        self.store.link_evidence(topic["id"], fragment["id"])
+        matches = self.store.lexical_matches("defensa")
+        self.assertEqual({item["entity_id"] for item in matches}, {fragment["id"], topic["id"]})
+        self.assertTrue(all(item["source_fragment_ids"] == [fragment["id"]] for item in matches))
+        self.store.update_topic(topic["id"], {"summary": "Juego en turn"})
+        self.assertEqual(self.store.lexical_matches("flop"), [])
+        self.assertEqual(self.store.lexical_matches("turn")[0]["entity_id"], topic["id"])
+        self.store.update_topic(topic["id"], {"examples": [{"text": "Chequeo defensivo"}]})
+        self.assertEqual(self.store.lexical_matches("defensivo")[0]["entity_id"], topic["id"])
+        self.store.replace_fragments(document["id"], [
+            {"kind": "paragraph", "locator": "p1", "content": "Rangos de apertura"},
+        ])
+        self.assertEqual(self.store.lexical_matches("ciega"), [])
+        self.assertEqual(len(self.store.lexical_matches("rangos")), 1)
+        self.assertEqual(len(Store(self.path).lexical_matches("turn")), 1)
+
+    def test_embedding_refresh_and_content_invalidation(self):
+        class FakeEmbeddingModel:
+            embedding_name = ""
+
+            def embed(self, content):
+                return [float(len(content)), 1.0]
+
+        topic = self.store.create_topic({"title": "Rangos", "difficulty": "basic"})
+        model = FakeEmbeddingModel()
+        indexer = RetrievalIndexer(self.store, model)
+        try:
+            model.embedding_name = "local-test"
+            self.assertEqual(indexer.refresh()["embedded"], 1)
+            self.store.update_topic(topic["id"], {"summary": "Nuevos rangos"})
+            self.assertEqual(self.store.index_status("local-test")["pending"], 1)
+            self.assertEqual(indexer.refresh()["embedded"], 1)
+            with self.store.read() as db:
+                entry = db.execute("SELECT embedding_json,content FROM search_entries WHERE entity_id=?", (topic["id"],)).fetchone()
+            self.assertEqual(json.loads(entry["embedding_json"]), [float(len(entry["content"])), 1.0])
+            self.assertEqual(indexer.store.embedding_entries("local-test")[0]["vector"],
+                             [float(len(entry["content"])), 1.0])
+        finally:
+            indexer.close()
+
+    def test_embedding_failure_is_visible_and_retryable(self):
+        class FlakyModel:
+            embedding_name = ""
+            available = False
+
+            def embed(self, content):
+                if not self.available:
+                    raise ModelUnavailable("embedding service offline")
+                return [1.0, 0.0]
+
+        model = FlakyModel()
+        self.store.create_topic({"title": "Rangos", "difficulty": "basic"})
+        indexer = RetrievalIndexer(self.store, model)
+        try:
+            model.embedding_name = "local-test"
+            indexer.refresh()
+            self.assertEqual(self.store.index_status(model.embedding_name)["failed"], 1)
+            self.assertEqual(len(self.store.lexical_matches("rangos")), 1)
+            model.available = True
+            self.store.retry_failed_embeddings()
+            self.assertEqual(indexer.refresh()["embedded"], 1)
+        finally:
+            indexer.close()
+
+    def test_version_two_migration_backfills_search_index(self):
+        document, _ = self.store.save_document("lesson.docx", b"source")
+        self.store.add_fragments(document["id"], [{"kind": "paragraph", "locator": "p1", "content": "Bote resubido"}])
+        self.store.create_topic({"title": "Defensa", "difficulty": "basic"})
+        with self.store.transaction() as db:
+            db.execute("DROP TRIGGER search_entries_insert")
+            db.execute("DROP TRIGGER search_entries_update")
+            db.execute("DROP TRIGGER search_entries_delete")
+            db.execute("DROP TABLE search_fts")
+            db.execute("DROP TABLE search_entries")
+            db.execute("PRAGMA user_version = 2")
+        reopened = Store(self.path)
+        self.assertEqual(len(reopened.lexical_matches("resubido")), 1)
+        self.assertEqual(len(reopened.lexical_matches("defensa")), 1)
+
 
 class ApiTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.store = Store(Path(self.temp.name))
-        self.server = PokerRootsServer(("127.0.0.1", 0), self.store)
+        self.server = PokerRootsServer(("127.0.0.1", 0), self.store,
+                                       LocalModel(name="", embedding_name=""))
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.addCleanup(self.server.server_close)
@@ -149,6 +238,11 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(current["difficulty"], "basic")
         self.assertEqual(self.request("GET", "/api/health")[1]["status"], "ok")
+        self.assertEqual(self.request("GET", "/api/health")[1]["database_version"], 3)
+        status, index = self.request("GET", "/api/index/status")
+        self.assertEqual(status, 200)
+        self.assertEqual(index["entries"], 1)
+        self.assertEqual(index["pending"], 1)
 
     def test_atomic_topic_edit_refreshes_tree_and_locations(self):
         root = self.store.create_branch("Fundamentos")
@@ -265,6 +359,17 @@ class ExtractionTests(unittest.TestCase):
         self.assertEqual([item["kind"] for item in extracted.fragments], ["paragraph", "table", "paragraph", "image"])
         self.assertEqual(extracted.fragments[0]["content"], "Posiciones")
         self.assertTrue(any("Text contained only inside images" in warning for warning in extracted.warnings))
+
+
+class LocalModelTests(unittest.TestCase):
+    def test_embedding_adapter_uses_local_embed_contract(self):
+        model = LocalModel(name="", embedding_name="test-embedding", base_url="http://127.0.0.1:11434")
+        with patch("backend.local_model.build_opener") as build:
+            build.return_value.open.return_value.__enter__.return_value = io.BytesIO(b'{"embeddings":[[0.25,-0.5]]}')
+            self.assertEqual(model.embed("Flop Axx"), [0.25, -0.5])
+            request = build.return_value.open.call_args.args[0]
+            self.assertEqual(request.full_url, "http://127.0.0.1:11434/api/embed")
+            self.assertEqual(json.loads(request.data), {"model": "test-embedding", "input": "Flop Axx"})
 
 
 class FakeModel:

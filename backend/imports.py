@@ -12,13 +12,16 @@ from .docx_extract import extract_docx, validate_docx
 from .local_model import LocalModel, ModelUnavailable
 from .storage import Store, StoreError
 from .topic_processor import TopicProcessor
+from .retrieval_index import RetrievalIndexer
 
 
 class ImportService:
-    def __init__(self, store: Store, model: LocalModel | None = None):
+    def __init__(self, store: Store, model: LocalModel | None = None,
+                 indexer: RetrievalIndexer | None = None):
         self.store = store
         self.model = model or LocalModel()
         self.processor = TopicProcessor(store, self.model)
+        self.indexer = indexer
         self.pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="docx-import")
         for document in store.list_documents():
             if document["state"] in {"queued", "extracting", "analyzing"}:
@@ -75,6 +78,8 @@ class ImportService:
                 return
             self.store.set_document_state(document_id, "analyzing", document["warnings"])
             self.processor.process(document_id)
+            if self.indexer:
+                self.indexer.schedule()
             self.store.set_document_state(document_id, "completed", document["warnings"])
         except Exception as exc:
             try:
@@ -113,6 +118,8 @@ class ImportService:
                     item["image_name"] = image_names[fragment["media_path"]]
                 fragments.append(item)
             self.store.replace_fragments(document_id, fragments)
+            if self.indexer:
+                self.indexer.schedule()
             for image_name in old_images - set(image_names.values()):
                 (self.store.images_dir / image_name).unlink(missing_ok=True)
             self.store.set_document_state(document_id, "extracted", extracted.warnings)

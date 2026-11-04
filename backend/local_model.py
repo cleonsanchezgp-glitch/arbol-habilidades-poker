@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -21,8 +22,10 @@ class _NoRedirect(HTTPRedirectHandler):
 
 
 class LocalModel:
-    def __init__(self, name: str | None = None, base_url: str | None = None):
+    def __init__(self, name: str | None = None, base_url: str | None = None,
+                 embedding_name: str | None = None):
         self.name = name if name is not None else os.environ.get("POKER_ROOTS_MODEL", "").strip()
+        self.embedding_name = embedding_name if embedding_name is not None else os.environ.get("POKER_ROOTS_EMBEDDING_MODEL", "").strip()
         self.base_url = (base_url or os.environ.get("POKER_ROOTS_OLLAMA_URL", "http://127.0.0.1:11434")).rstrip("/")
         parsed = urlsplit(self.base_url)
         if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"} or parsed.username or parsed.password or parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
@@ -58,3 +61,28 @@ class LocalModel:
         if not isinstance(generated, dict):
             raise StoreError("Local model result must be a JSON object")
         return generated
+
+    def embed(self, content: str) -> list[float]:
+        """Embed text with the separately configured local retrieval model."""
+        if not self.embedding_name:
+            raise ModelUnavailable("Set POKER_ROOTS_EMBEDDING_MODEL to an installed local embedding model and restart the API")
+        payload = json.dumps({"model": self.embedding_name, "input": content}, ensure_ascii=False).encode("utf-8")
+        request = Request(self.base_url + "/api/embed", payload, {"Content-Type": "application/json"}, method="POST")
+        try:
+            with build_opener(ProxyHandler({}), _NoRedirect()).open(request, timeout=180) as response:
+                result = json.load(response)
+        except HTTPError as exc:
+            with exc:
+                detail = exc.read(500).decode("utf-8", "replace")
+            raise ModelUnavailable(f"Local embedding model returned HTTP {exc.code}: {detail}") from exc
+        except (URLError, TimeoutError, OSError) as exc:
+            raise ModelUnavailable("Local embedding model is unavailable") from exc
+        except (ValueError, UnicodeError) as exc:
+            raise StoreError("Local embedding model returned invalid JSON") from exc
+        vectors = result.get("embeddings") if isinstance(result, dict) else None
+        if not isinstance(vectors, list) or len(vectors) != 1 or not isinstance(vectors[0], list) or not vectors[0]:
+            raise StoreError("Local embedding model returned no vector")
+        vector = vectors[0]
+        if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) for value in vector):
+            raise StoreError("Local embedding model returned an invalid vector")
+        return [float(value) for value in vector]

@@ -100,9 +100,9 @@ class Store:
     def _migrate(self) -> None:
         with self.transaction() as db:
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version > 2:
+            if version > 3:
                 raise RuntimeError(f"Unsupported database version: {version}")
-            if version == 2:
+            if version == 3:
                 return
             if version == 0:
                 schema = """
@@ -174,6 +174,128 @@ class Store:
                     PRIMARY KEY(topic_id,candidate_id)
                 )""")
                 db.execute("PRAGMA user_version = 2")
+            if version < 3:
+                db.execute("""CREATE TABLE search_entries (
+                    id INTEGER PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('fragment','topic')),
+                    entity_id TEXT NOT NULL, source_fragment_id TEXT,
+                    content TEXT NOT NULL, embedding_model TEXT,
+                    embedding_json TEXT, embedding_error TEXT,
+                    UNIQUE(kind, entity_id)
+                )""")
+                db.execute("""CREATE VIRTUAL TABLE search_fts USING fts5(
+                    content, content='search_entries', content_rowid='id', tokenize='unicode61'
+                )""")
+                db.execute("""CREATE TRIGGER search_entries_insert AFTER INSERT ON search_entries BEGIN
+                    INSERT INTO search_fts(rowid,content) VALUES (new.id,new.content);
+                END""")
+                db.execute("""CREATE TRIGGER search_entries_delete AFTER DELETE ON search_entries BEGIN
+                    INSERT INTO search_fts(search_fts,rowid,content) VALUES ('delete',old.id,old.content);
+                END""")
+                db.execute("""CREATE TRIGGER search_entries_update AFTER UPDATE OF content ON search_entries BEGIN
+                    INSERT INTO search_fts(search_fts,rowid,content) VALUES ('delete',old.id,old.content);
+                    INSERT INTO search_fts(rowid,content) VALUES (new.id,new.content);
+                END""")
+                for row in db.execute("SELECT * FROM fragments WHERE trim(content) <> ''").fetchall():
+                    self._upsert_search_entry(db, "fragment", row["id"], row["content"], row["id"])
+                for row in db.execute("SELECT * FROM topics").fetchall():
+                    self._sync_topic_search(db, row["id"])
+                db.execute("PRAGMA user_version = 3")
+
+    @staticmethod
+    def _upsert_search_entry(db: sqlite3.Connection, kind: str, entity_id: str,
+                             content: str, source_fragment_id: str | None = None) -> None:
+        if not content.strip():
+            db.execute("DELETE FROM search_entries WHERE kind=? AND entity_id=?", (kind, entity_id))
+            return
+        db.execute("""INSERT INTO search_entries(kind,entity_id,source_fragment_id,content)
+            VALUES (?,?,?,?) ON CONFLICT(kind,entity_id) DO UPDATE SET
+            source_fragment_id=excluded.source_fragment_id, content=excluded.content,
+            embedding_model=NULL, embedding_json=NULL, embedding_error=NULL
+            WHERE search_entries.content <> excluded.content
+               OR search_entries.source_fragment_id IS NOT excluded.source_fragment_id""",
+            (kind, entity_id, source_fragment_id, content))
+
+    def _sync_topic_search(self, db: sqlite3.Connection, topic_id: str) -> None:
+        topic = db.execute("SELECT * FROM topics WHERE id=?", (topic_id,)).fetchone()
+        facets = db.execute("SELECT name,value FROM facets WHERE topic_id=? ORDER BY name", (topic_id,))
+        parts = [topic[name] for name in ("title", "summary", "explanation", "conditions")]
+        parts.extend(json.loads(topic["tags_json"]))
+        for field in ("examples_json", "visuals_json"):
+            for item in json.loads(topic[field]):
+                if isinstance(item, str):
+                    parts.append(item)
+                elif isinstance(item, dict):
+                    parts.extend(item.get(name) for name in ("text", "description", "caption"))
+        parts.extend(f"{row['name']} {row['value']}" for row in facets if row["value"] is not None)
+        self._upsert_search_entry(db, "topic", topic_id,
+                                  "\n".join(part for part in parts if isinstance(part, str) and part.strip()))
+
+    def lexical_matches(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
+        """Return current FTS matches with stable source-fragment identifiers."""
+        tokens = re.findall(r"\w+", query, flags=re.UNICODE)
+        if not tokens:
+            return []
+        expression = " OR ".join('"' + token.replace('"', '""') + '"' for token in tokens)
+        with self.read() as db:
+            rows = db.execute("""SELECT e.kind,e.entity_id,e.source_fragment_id,e.content,
+                bm25(search_fts) AS score FROM search_fts JOIN search_entries e ON e.id=search_fts.rowid
+                WHERE search_fts MATCH ? ORDER BY score,e.kind,e.entity_id LIMIT ?""",
+                (expression, max(1, min(limit, 100)))).fetchall()
+            result = []
+            for row in rows:
+                item = dict(row)
+                if row["kind"] == "topic":
+                    item["source_fragment_ids"] = [source[0] for source in db.execute(
+                        "SELECT DISTINCT fragment_id FROM topic_evidence WHERE topic_id=? ORDER BY fragment_id",
+                        (row["entity_id"],))]
+                else:
+                    item["source_fragment_ids"] = [row["source_fragment_id"]]
+                result.append(item)
+            return result
+
+    def pending_embeddings(self, model_name: str, limit: int = 100) -> list[dict[str, Any]]:
+        with self.read() as db:
+            return [dict(row) for row in db.execute("""SELECT id,kind,entity_id,content FROM search_entries
+                WHERE (embedding_json IS NULL OR embedding_model <> ?)
+                AND embedding_error IS NULL ORDER BY id LIMIT ?""", (model_name, limit))]
+
+    def embedding_entries(self, model_name: str) -> list[dict[str, Any]]:
+        """Provide current local vectors and their evidence IDs for semantic retrieval."""
+        with self.read() as db:
+            rows = db.execute("""SELECT kind,entity_id,source_fragment_id,content,embedding_json
+                FROM search_entries WHERE embedding_model=? AND embedding_json IS NOT NULL
+                ORDER BY kind,entity_id""", (model_name,)).fetchall()
+            result = []
+            for row in rows:
+                item = dict(row)
+                item["vector"] = json.loads(item.pop("embedding_json"))
+                item["source_fragment_ids"] = ([source[0] for source in db.execute(
+                    "SELECT DISTINCT fragment_id FROM topic_evidence WHERE topic_id=? ORDER BY fragment_id",
+                    (row["entity_id"],))] if row["kind"] == "topic" else [row["source_fragment_id"]])
+                result.append(item)
+            return result
+
+    def save_embedding(self, entry_id: int, content: str, model_name: str,
+                       vector: list[float] | None, error: str | None = None) -> bool:
+        with self.transaction() as db:
+            return db.execute("""UPDATE search_entries SET embedding_model=?, embedding_json=?, embedding_error=?
+                WHERE id=? AND content=?""",
+                (model_name, json.dumps(vector) if vector is not None else None, error, entry_id, content)).rowcount == 1
+
+    def retry_failed_embeddings(self) -> None:
+        with self.transaction() as db:
+            db.execute("UPDATE search_entries SET embedding_error=NULL WHERE embedding_error IS NOT NULL")
+
+    def index_status(self, model_name: str | None = None) -> dict[str, Any]:
+        with self.read() as db:
+            row = db.execute("""SELECT COUNT(*) AS total,
+                SUM(CASE WHEN embedding_json IS NOT NULL AND embedding_model=? THEN 1 ELSE 0 END) AS ready,
+                SUM(CASE WHEN embedding_error IS NOT NULL THEN 1 ELSE 0 END) AS failed
+                FROM search_entries""", (model_name,)).fetchone()
+        return {"entries": row["total"], "embedded": row["ready"] or 0,
+                "failed": row["failed"] or 0,
+                "pending": row["total"] - (row["ready"] or 0) - (row["failed"] or 0),
+                "embedding_model": model_name}
 
     @staticmethod
     def _row(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -265,6 +387,7 @@ class Store:
                 fragment_id = uuid.uuid4().hex
                 item = {"id": fragment_id, "document_id": document_id, "ordinal": start + offset, "kind": kind, "locator": str(fragment.get("locator", "")), "content": str(fragment.get("content", "")), "image_name": fragment.get("image_name")}
                 db.execute("INSERT INTO fragments (id,document_id,ordinal,kind,locator,content,image_name) VALUES (:id,:document_id,:ordinal,:kind,:locator,:content,:image_name)", item)
+                self._upsert_search_entry(db, "fragment", item["id"], item["content"], item["id"])
                 result.append(item)
             return result
 
@@ -273,6 +396,7 @@ class Store:
         with self.transaction() as db:
             if not db.execute("SELECT 1 FROM documents WHERE id=?", (document_id,)).fetchone():
                 raise StoreError("Document not found")
+            db.execute("DELETE FROM search_entries WHERE kind='fragment' AND entity_id IN (SELECT id FROM fragments WHERE document_id=?)", (document_id,))
             db.execute("DELETE FROM fragments WHERE document_id=?", (document_id,))
             result = []
             for ordinal, fragment in enumerate(fragments):
@@ -283,6 +407,7 @@ class Store:
                         "kind": kind, "locator": str(fragment.get("locator", "")),
                         "content": str(fragment.get("content", "")), "image_name": fragment.get("image_name")}
                 db.execute("INSERT INTO fragments (id,document_id,ordinal,kind,locator,content,image_name) VALUES (:id,:document_id,:ordinal,:kind,:locator,:content,:image_name)", item)
+                self._upsert_search_entry(db, "fragment", item["id"], item["content"], item["id"])
                 result.append(item)
             return result
 
@@ -336,6 +461,7 @@ class Store:
         with self.transaction() as db:
             db.execute("""INSERT INTO topics (id,title,summary,explanation,conditions,examples_json,visuals_json,difficulty,tags_json,review_status,created_at,updated_at,claims_json,unknowns_json,contradictions_json,prerequisite_proposals_json)
                           VALUES (:id,:title,:summary,:explanation,:conditions,:examples_json,:visuals_json,:difficulty,:tags_json,:review_status,:created_at,:updated_at,:claims_json,:unknowns_json,:contradictions_json,:prerequisite_proposals_json)""", values)
+            self._sync_topic_search(db, values["id"])
         return self.get_topic(values["id"])
 
     def get_topic(self, topic_id: str) -> dict[str, Any]:
@@ -440,6 +566,7 @@ class Store:
                     db.execute("INSERT INTO topic_evidence(topic_id,fragment_id,role) VALUES (?,?,?)", (topic_id, source_id, "supports"))
                 for name, value in facets.items():
                     db.execute("INSERT INTO facets(topic_id,name,value) VALUES (?,?,?)", (topic_id, name, value))
+                self._sync_topic_search(db, topic_id)
                 for candidate_id, title, summary in existing:
                     score = _similarity(values["title"] + " " + values["summary"], title + " " + summary)
                     if score >= 0.55:
@@ -518,6 +645,8 @@ class Store:
                                (topic_id, prerequisite_id))
             if not topic_data:
                 db.execute("UPDATE topics SET updated_at=? WHERE id=?", (utc_now(), topic_id))
+            if topic_data or facets is not None:
+                self._sync_topic_search(db, topic_id)
         return self.get_topic(topic_id)
 
     def update_topic(self, topic_id: str, data: dict[str, Any]) -> dict[str, Any]:
@@ -530,6 +659,7 @@ class Store:
                 raise StoreError("Topic not found")
             db.execute("DELETE FROM facets WHERE topic_id=?", (topic_id,))
             db.executemany("INSERT INTO facets(topic_id,name,value) VALUES (?,?,?)", [(topic_id, name, value) for name, value in normalised.items()])
+            self._sync_topic_search(db, topic_id)
         return self.get_topic(topic_id)
 
     def link_evidence(self, topic_id: str, fragment_id: str, role: str = "supports") -> dict[str, Any]:

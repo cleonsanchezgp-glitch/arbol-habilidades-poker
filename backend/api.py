@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 
 from .imports import ImportService
 from .local_model import LocalModel
+from .retrieval_index import RetrievalIndexer
 from .storage import Store, StoreError
 
 
@@ -26,10 +27,13 @@ class PokerRootsServer(ThreadingHTTPServer):
     def __init__(self, address: tuple[str, int], store: Store, model: LocalModel | None = None):
         super().__init__(address, Handler)
         self.store = store
-        self.imports = ImportService(store, model)
+        selected_model = model or LocalModel()
+        self.indexer = RetrievalIndexer(store, selected_model)
+        self.imports = ImportService(store, selected_model, self.indexer)
 
     def server_close(self) -> None:
         self.imports.close()
+        self.indexer.close()
         super().server_close()
 
 
@@ -94,6 +98,8 @@ class Handler(BaseHTTPRequestHandler):
     def _handle(self, method: str) -> None:
         try:
             result = self._route(method, self._segments())
+            if method in {"POST", "PUT", "DELETE"}:
+                self.server.indexer.schedule()
             if result is SENT_FILE:
                 return
             if result is None:
@@ -123,7 +129,13 @@ class Handler(BaseHTTPRequestHandler):
     def _route(self, method: str, parts: list[str]):
         store = self.server.store
         if parts == ["api", "health"] and method == "GET":
-            return {"status": "ok", "database_version": 2, "model_configured": self.server.imports.model.configured}
+            return {"status": "ok", "database_version": 3, "model_configured": self.server.imports.model.configured}
+        if parts == ["api", "index", "status"] and method == "GET":
+            return store.index_status(getattr(self.server.indexer.model, "embedding_name", ""))
+        if parts == ["api", "index", "retry"] and method == "POST":
+            store.retry_failed_embeddings()
+            self.server.indexer.schedule()
+            return HTTPStatus.ACCEPTED, store.index_status(getattr(self.server.indexer.model, "embedding_name", ""))
         if parts == ["api", "documents"]:
             if method == "GET":
                 return {"documents": store.list_documents()}
