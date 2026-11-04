@@ -8,7 +8,6 @@ const scenes = [
 const state = { branches: [], topics: [], selected: { kind: 'root' }, selectionVersion: 0 };
 const region = document.querySelector('#treeRegion');
 const reloadButton = document.querySelector('#reloadButton');
-const venues = document.querySelector('#venues');
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -24,17 +23,6 @@ function setScene(depth) {
   document.querySelector('#sceneNumber').textContent = `0${index + 1}`;
   document.querySelector('#sceneTitle').textContent = scene.title;
   document.querySelector('#sceneText').textContent = scene.text;
-  [...venues.children].forEach((venue, position) => venue.classList.toggle('active', position === index));
-}
-
-function renderVenues() {
-  scenes.forEach((scene, index) => {
-    const venue = element('div', 'venue');
-    venue.style.setProperty('--thumb', `url('/assets/drawn-${index}.jpg')`);
-    venue.append(element('small', '', `ESCENARIO 0${index + 1}`),
-      element('strong', '', scene.title), element('span', '', scene.subtitle));
-    venues.append(venue);
-  });
 }
 
 function message(text, action) {
@@ -70,6 +58,46 @@ function branchDepth(branchId) {
   return depth;
 }
 
+let treeConnectorFrame = 0;
+function scheduleTreeConnectors() {
+  cancelAnimationFrame(treeConnectorFrame);
+  treeConnectorFrame = requestAnimationFrame(drawTreeConnectors);
+}
+
+function drawTreeConnectors() {
+  const tree = region.querySelector('.tree-content');
+  if (!tree) return;
+  let svg = tree.querySelector(':scope > .tree-connectors');
+  if (!svg) {
+    svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.classList.add('tree-connectors');
+    svg.setAttribute('aria-hidden', 'true');
+    tree.prepend(svg);
+  }
+  const bounds = tree.getBoundingClientRect();
+  svg.setAttribute('viewBox', `0 0 ${bounds.width} ${bounds.height}`);
+  svg.replaceChildren();
+  for (const item of tree.querySelectorAll('.tree-item')) {
+    const child = item.querySelector(':scope > .chip-node');
+    if (!child || !child.getClientRects().length) continue;
+    const parentItem = item.parentElement.closest('.branch-item');
+    const parent = parentItem?.querySelector(':scope > .chip-node') || tree.querySelector(':scope > .chip-node.root');
+    if (!parent || !parent.getClientRects().length) continue;
+    const from = parent.getBoundingClientRect();
+    const to = child.getBoundingClientRect();
+    const x1 = from.left + from.width / 2 - bounds.left;
+    const y1 = from.bottom - bounds.top;
+    const x2 = to.left + to.width / 2 - bounds.left;
+    const y2 = to.top - bounds.top;
+    const middle = y1 + (y2 - y1) / 2;
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', `M ${x1} ${y1} C ${x1} ${middle}, ${x2} ${middle}, ${x2} ${y2}`);
+    svg.append(path);
+  }
+}
+
+window.addEventListener('resize', scheduleTreeConnectors);
+
 function renderTree() {
   const branches = state.branches;
   const topics = state.topics;
@@ -101,21 +129,26 @@ function renderTree() {
     const button = nodeButton(topic.title, '♠', 'topic', depth, () => selectTopic(topic.id, branchId));
     button.dataset.topicId = topic.id;
     button.dataset.branchId = branchId;
-    button.append(element('span', 'chip-badge', topic.difficulty));
+    button.append(element('span', 'chip-badge',
+      { basic: 'básico', intermediate: 'intermedio', advanced: 'avanzado' }[topic.difficulty] || topic.difficulty));
     item.append(button);
     return item;
   }
 
   function makeBranch(branch, depth) {
     const item = element('li', 'tree-item branch-item');
+    const descendants = element('ul', 'tree-children');
+    descendants.id = `branch-children-${branch.id}`;
     const button = nodeButton(branch.name, '♧', 'branch', depth, () => selectBranch(branch.id));
     button.dataset.branchId = branch.id;
     button.dataset.kind = 'branch';
     item.append(button);
-    const descendants = element('ul', 'tree-children');
     for (const topic of topicsByBranch.get(branch.id) || []) descendants.append(makeTopic(topic, branch.id, depth + 1));
     for (const child of children.get(branch.id) || []) descendants.append(makeBranch(child, depth + 1));
-    if (descendants.children.length) item.append(descendants);
+    if (descendants.children.length) {
+      item.classList.add('expanded');
+      item.append(descendants);
+    }
     return item;
   }
 
@@ -138,6 +171,7 @@ function renderTree() {
     tree.append(empty);
   }
   region.replaceChildren(tree);
+  scheduleTreeConnectors();
   document.querySelector('#treeCount').textContent = `${branches.length} ramas · ${topics.length} temas`;
 }
 
@@ -209,11 +243,14 @@ async function selectTopic(topicId, branchId) {
     branchId === 'unplaced' ? 1 : branchDepth(branchId) + 1);
 
   const meta = document.querySelector('#detailMeta');
-  meta.append(element('span', 'meta-pill', `Dificultad: ${topic.difficulty}`),
-    element('span', 'meta-pill', `Revisión: ${topic.review_status}`));
+  const difficulty = { basic: 'básico', intermediate: 'intermedio', advanced: 'avanzado' }[topic.difficulty] || topic.difficulty;
+  const review = { proposed: 'propuesto', reviewed: 'revisado', approved: 'aprobado' }[topic.review_status] || topic.review_status;
+  meta.append(element('span', 'meta-pill', `Dificultad: ${difficulty}`),
+    element('span', 'meta-pill', `Revisión: ${review}`));
   if (topic.conditions) meta.append(element('p', 'condition', `Condiciones: ${topic.conditions}`));
 
   const links = document.querySelector('#detailLinks');
+  links.append(linkButton('Leer tema completo y fuentes →', () => openTopic(topicId)));
   if (topic.prerequisites.length) {
     const group = element('div', 'relation-group');
     group.append(element('strong', '', 'Antes de este tema'));
@@ -256,7 +293,7 @@ async function loadTree() {
     const prior = state.selected;
     if (prior.kind === 'topic' && state.topics.some(topic => topic.id === prior.id)) {
       const topic = state.topics.find(item => item.id === prior.id);
-      selectTopic(prior.id, topic.placements.includes(prior.branchId) ? prior.branchId : topic.placements[0] || 'unplaced');
+      focusTopic(prior.id, topic.placements.includes(prior.branchId) ? prior.branchId : topic.placements[0] || 'unplaced');
     } else if (prior.kind === 'branch' && state.branches.some(branch => branch.id === prior.id)) {
       selectBranch(prior.id);
     } else {
@@ -274,7 +311,6 @@ async function loadTree() {
   }
 }
 
-renderVenues();
 document.querySelector('#rootButton').addEventListener('click', selectRoot);
 reloadButton.addEventListener('click', loadTree);
 loadTree();

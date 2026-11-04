@@ -1,6 +1,6 @@
 # Poker Roots — mapa visual conectado
 
-Esta carpeta conserva los cuatro escenarios ilustrados del boceto y contiene ahora el árbol conectado a la biblioteca local. Las ramas, temas, ubicaciones y prerrequisitos vienen de `GET /api/tree`; no hay teoría de ejemplo en la interfaz activa.
+Esta carpeta conserva los cuatro escenarios ilustrados del boceto y contiene ahora el árbol conectado a la biblioteca local. Las ramas, temas, ubicaciones y prerrequisitos vienen de `GET /api/tree`; no hay teoría de ejemplo en la interfaz activa. El árbol usa nodos circulares y conexiones entre conceptos. Todas las ramas permanecen visibles en un mapa que ocupa el espacio disponible junto al menú lateral y crece hacia abajo; elegir una ficha muestra sus detalles. El menú permite abrir el mapa y las herramientas de biblioteca, y se adapta a una barra de iconos en móvil.
 
 ## Abrir
 

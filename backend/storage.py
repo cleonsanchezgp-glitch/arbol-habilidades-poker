@@ -480,11 +480,26 @@ class Store:
         }
 
     def create_topic(self, data: dict[str, Any]) -> dict[str, Any]:
-        values = self._topic_values(data)
+        values = self._topic_values({key: value for key, value in data.items()
+                                     if key not in {"branch_id", "source_fragment_id"}})
+        branch_id = data.get("branch_id") or None
+        fragment_id = data.get("source_fragment_id") or None
+        if branch_id is not None and not isinstance(branch_id, str):
+            raise StoreError("Invalid branch ID")
+        if fragment_id is not None and not isinstance(fragment_id, str):
+            raise StoreError("Invalid source fragment ID")
         values.update(id=uuid.uuid4().hex, created_at=utc_now(), updated_at=utc_now())
         with self.transaction() as db:
+            if branch_id and not db.execute("SELECT 1 FROM branches WHERE id=?", (branch_id,)).fetchone():
+                raise StoreError("Branch not found")
+            if fragment_id and not db.execute("SELECT 1 FROM fragments WHERE id=?", (fragment_id,)).fetchone():
+                raise StoreError("Source fragment not found")
             db.execute("""INSERT INTO topics (id,title,summary,explanation,conditions,examples_json,visuals_json,difficulty,tags_json,review_status,created_at,updated_at,claims_json,unknowns_json,contradictions_json,prerequisite_proposals_json)
                           VALUES (:id,:title,:summary,:explanation,:conditions,:examples_json,:visuals_json,:difficulty,:tags_json,:review_status,:created_at,:updated_at,:claims_json,:unknowns_json,:contradictions_json,:prerequisite_proposals_json)""", values)
+            if branch_id:
+                db.execute("INSERT INTO placements(topic_id,branch_id) VALUES (?,?)", (values["id"], branch_id))
+            if fragment_id:
+                db.execute("INSERT INTO topic_evidence(topic_id,fragment_id,role) VALUES (?,?,'supports')", (values["id"], fragment_id))
             self._sync_topic_search(db, values["id"])
         return self.get_topic(values["id"])
 

@@ -51,6 +51,25 @@ class StorageTests(unittest.TestCase):
         self.path = Path(self.temp.name)
         self.store = Store(self.path)
 
+    def test_manual_topic_creation_links_source_and_branch_atomically(self):
+        document, _ = self.store.save_document("lesson.docx", sample_docx())
+        fragment = self.store.add_fragments(document["id"], [
+            {"kind": "paragraph", "locator": "p1", "content": "Posiciones"},
+        ])[0]
+        branch = self.store.create_branch("Preflop")
+        topic = self.store.create_topic({
+            "title": "Posiciones", "summary": "BTN y BB", "difficulty": "basic",
+            "branch_id": branch["id"], "source_fragment_id": fragment["id"],
+        })
+        self.assertEqual(topic["placements"], [branch["id"]])
+        self.assertEqual(topic["evidence"][0]["fragment_id"], fragment["id"])
+        self.assertEqual(self.store.topics_for_document(document["id"])[0]["id"], topic["id"])
+        self.assertEqual(Store(self.path).get_topic(topic["id"])["evidence"], topic["evidence"])
+        with self.assertRaisesRegex(StoreError, "Source fragment not found"):
+            self.store.create_topic({"title": "Sin fuente", "branch_id": branch["id"],
+                                     "source_fragment_id": "missing"})
+        self.assertEqual(len(self.store.list_topics()), 1)
+
     def test_persistence_duplicate_detection_and_atomic_fragments(self):
         document, created = self.store.save_document("lesson.docx", b"fixture docx")
         self.assertTrue(created)
@@ -416,6 +435,25 @@ class ExtractionTests(unittest.TestCase):
         self.assertEqual(extracted.fragments[0]["content"], "Posiciones")
         self.assertTrue(any("Text contained only inside images" in warning for warning in extracted.warnings))
 
+    def test_section_break_keeps_body_order_and_reports_omitted_header(self):
+        document_xml = """<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+          <w:body>
+            <w:p><w:pPr><w:sectPr/></w:pPr><w:r><w:t>Primera sección</w:t></w:r></w:p>
+            <w:tbl><w:tr><w:tc><w:p><w:r><w:t>BB</w:t></w:r></w:p></w:tc></w:tr></w:tbl>
+            <w:p><w:r><w:t>Segunda sección</w:t></w:r></w:p>
+            <w:sectPr/>
+          </w:body></w:document>"""
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as package:
+            package.writestr("[Content_Types].xml", '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>')
+            package.writestr("word/document.xml", document_xml)
+            package.writestr("word/header1.xml", "<header/>")
+        extracted = extract_docx(output.getvalue(), "sections.docx")
+        self.assertEqual([item["kind"] for item in extracted.fragments], ["paragraph", "table", "paragraph"])
+        self.assertEqual([item["content"] for item in extracted.fragments if item["kind"] == "paragraph"],
+                         ["Primera sección", "Segunda sección"])
+        self.assertTrue(any("Headers" in warning for warning in extracted.warnings))
+
 
 class LocalModelTests(unittest.TestCase):
     def test_embedding_adapter_uses_local_embed_contract(self):
@@ -639,6 +677,46 @@ class ProcessingTests(unittest.TestCase):
             TopicProcessor(self.store, FakeModel(invalid=True)).process(self.document["id"])
         self.assertEqual(self.store.topics_for_document(self.document["id"]), [])
         self.assertFalse(self.store.analysis_exists(self.document["id"]))
+
+    def test_conflicts_unknowns_and_example_origins_keep_their_sources(self):
+        class ConflictingModel:
+            def generate_json(self, system, prompt):
+                return {"topics": [{
+                    "title": "Posiciones", "summary": "Posiciones",
+                    "explanation_blocks": [{"text": "BTN y BB", "source_refs": ["F2"]}],
+                    "conditions": [{"text": "Depende de la posición", "source_refs": ["F1"]}],
+                    "examples": [
+                        {"text": "BTN y BB", "origin": "source", "source_refs": ["F2"]},
+                        {"text": "Ejemplo didáctico", "origin": "generated", "source_refs": []},
+                    ],
+                    "difficulty": "basic", "source_refs": ["F1", "F2"],
+                    "unknowns": ["Stack no indicado"],
+                    "contradictions": [{"text": "Revisar las posiciones", "source_refs": ["F1", "F2"]}],
+                }]}
+
+        topic = TopicProcessor(self.store, ConflictingModel()).process(self.document["id"])[0]
+        reopened = Store(self.path).get_topic(topic["id"])
+        self.assertEqual(reopened["unknowns"], ["Stack no indicado"])
+        self.assertEqual(set(reopened["contradictions"][0]["source_fragment_ids"]),
+                         {fragment["id"] for fragment in self.fragments})
+        self.assertEqual(reopened["examples"][0]["source_fragment_ids"], [self.fragments[1]["id"]])
+        self.assertEqual(reopened["examples"][1]["origin"], "generated")
+        self.assertEqual(reopened["examples"][1]["source_fragment_ids"], [])
+        self.assertEqual(reopened["claims"][1]["source_fragment_ids"], [self.fragments[0]["id"]])
+
+    def test_unknown_conflict_source_rejects_entire_proposal(self):
+        class InvalidConflictModel:
+            def generate_json(self, system, prompt):
+                return {"topics": [{
+                    "title": "Posiciones", "summary": "Posiciones",
+                    "explanation_blocks": [{"text": "Posiciones", "source_refs": ["F1"]}],
+                    "difficulty": "basic", "source_refs": ["F1"],
+                    "contradictions": [{"text": "Conflicto", "source_refs": ["F99"]}],
+                }]}
+
+        with self.assertRaisesRegex(StoreError, "unknown or missing source"):
+            TopicProcessor(self.store, InvalidConflictModel()).process(self.document["id"])
+        self.assertEqual(self.store.topics_for_document(self.document["id"]), [])
 
     def test_api_analyzes_extracted_document(self):
         server = PokerRootsServer(("127.0.0.1", 0), self.store, FakeModel())

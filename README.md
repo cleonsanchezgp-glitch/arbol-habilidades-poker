@@ -6,15 +6,31 @@ Local application in progress for organizing user-imported Texas Hold'em theory.
 
 WP-001 provides a durable SQLite store and a loopback HTTP API using Python's standard library. WP-002 adds DOCX validation and background extraction. WP-003 adds source-linked topic proposals through a locally configured Ollama-compatible text model. WP-005 adds a local FTS5 index, background embeddings when a local embedding model is configured, source-linked search, and prerequisite-ordered study paths. The visual tree renders saved branches, topics, placements, and prerequisites; the browser views expose the existing API workflows. The application stores original document bytes, ordered source fragments, extractable images, topics, evidence links, strategic facets, branches, placements, and acyclic prerequisite relations. Data survives process restarts.
 
+The tree opens branches below their parent, with connector lines showing which concepts belong to each more general concept. Click a branch to expand or collapse it; long topic names wrap, and the page grows downward without horizontal tree scrolling.
+
 Python 3.10 or newer is required. No package installation is needed for this foundation.
 
+### Docker access
+
+With Docker Desktop running, start the local app from the repository root:
+
 ```powershell
-$env:POKER_ROOTS_MODEL = "your-installed-local-model"
-$env:POKER_ROOTS_EMBEDDING_MODEL = "your-installed-local-embedding-model"
+docker-compose up --build -d
+```
+
+Open `http://127.0.0.1:8765/` in your browser. `compose.yaml` publishes port 8765 only on this computer and keeps the library in the `poker_roots_data` Docker volume. On first start, an empty volume receives two clearly labelled fictional DOCX documents, six topics and six branches so the interface is ready to explore. An existing library is left untouched. Use `docker-compose ps` to check the container or `docker-compose down` to stop it; `down` preserves the volume. Docker starts in manual mode without a local model, so import, source review, manual topics and the tree remain available.
+
+### Run directly with Python
+
+```powershell
 python -m backend.api --data-dir .poker-roots-data --port 8765
 ```
 
+To add the same sample library when running directly with Python, execute `python -m backend.demo_data --data-dir .poker-roots-data` before starting the server, then click **Actualizar** in an open browser tab. The seed command is repeatable and does not duplicate its data. All sample documents and topics begin with `Muestra`; they are fictional UI examples, not poker advice or Mentopoker material. This workspace's ignored `.poker-roots-data` directory has already been seeded for direct Python access.
+
 Open `http://127.0.0.1:8765/` for the visual tree and `/api/health` to check the server. The page and API share the same local origin; opening `index.html` as a file does not load the library. The data directory defaults to `%LOCALAPPDATA%\PokerRoots` on Windows (or the user data directory on other systems) when `--data-dir` and `POKER_ROOTS_DATA_DIR` are not provided. Keep this directory to retain the library across restarts; back it up before replacing the machine or deleting user data.
+
+Without a model, use **Importar un DOCX** to retain the original and inspect ordered source fragments. Then use **Crear un tema** to write a topic, choose its branch, and link a supporting fragment in one save. The topic appears immediately in the tree; open it there to read it or correct it. Search answers require a local model, while the tree, documents, manual topics, sources and study paths remain available.
 
 Run a compatible model service on `http://127.0.0.1:11434`, or set `POKER_ROOTS_OLLAMA_URL` to another loopback HTTP address. Set `POKER_ROOTS_MODEL` to the name of a model actually installed there. The current environment has no reachable local model, so generation has been checked with a simulated model; quality on real theory remains unverified. Without configuration, DOCX extraction succeeds and the document waits in `awaiting_model`. After configuring the service and restarting, call its `/analyze` endpoint. Generated topics are marked `proposed` for manual review. Images are retained as source assets but are not interpreted by the text model.
 
@@ -62,3 +78,5 @@ python -m unittest discover -s tests -v
 For the optional browser smoke check, install the development dependency with `npm install` and run `npm run test:ui`. It uses a local Edge installation on Windows (or set `POKER_ROOTS_BROWSER_PATH` to a Chromium-compatible executable), launches an isolated API with synthetic data, and checks desktop and 390px navigation, visible states, editing, search, a two-topic import, and immediate tree refresh. The fixture uses a simulated local model; this check does not establish the quality of answers from a real model.
 
 The tests use disposable data directories, synthetic DOCX packages, and simulated local models. They check extraction order, image access, invalid-file rejection, persistence after reopening the store, duplicate document hashes, atomic fragment writes, source-linked multi-topic proposals, numeric-detail rejection, cycle rejection, API error handling, FTS5 refresh and migration, local embedding calls, retry after embedding failure, semantic and lexical retrieval, clarification, insufficient coverage, source-reference validation, evidence-bounded prerequisite study paths, and same-origin serving of the visual tree.
+
+To audit a supplied DOCX without copying it into the repository, run `python scripts/audit_docx.py "path/to/document.docx"`. The audit independently compares ordered body text and tables with extraction, then checks temporary import persistence, duplicate detection, warnings, and the expected `awaiting_model` state. It intentionally disables model generation; semantic fidelity needs a separate review with a real local model.

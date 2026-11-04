@@ -17,19 +17,32 @@
   </header>
 
   <div class="layout">
-    <aside class="sidebar" aria-label="Escenarios del mapa">
-      <div class="eyebrow">CUATRO ESCENARIOS</div>
-      <p class="side-heading">Tu juego<br>echa raíces.</p>
-      <div class="venues" id="venues"></div>
-      <div class="side-note">Los escenarios acompañan la profundidad del mapa. La dificultad y los prerrequisitos de cada tema proceden de tu biblioteca guardada.</div>
+    <aside class="sidebar" aria-label="Menú principal">
+      <div class="eyebrow sidebar-heading">TU BIBLIOTECA</div>
+      <nav class="side-menu" aria-label="Secciones">
+        <button type="button" data-nav="map" aria-label="Mapa" aria-current="page"><span aria-hidden="true">♧</span><strong>Mapa</strong></button>
+        <button type="button" data-nav="import" aria-label="Importar"><span aria-hidden="true">⇧</span><strong>Importar</strong></button>
+        <button type="button" data-nav="reader" aria-label="Leer y editar"><span aria-hidden="true">✎</span><strong>Leer y editar</strong></button>
+        <button type="button" data-nav="sources" aria-label="Fuentes"><span aria-hidden="true">▤</span><strong>Fuentes</strong></button>
+        <button type="button" data-nav="search" aria-label="Buscar"><span aria-hidden="true">⌕</span><strong>Buscar</strong></button>
+        <button type="button" data-nav="study" aria-label="Estudiar"><span aria-hidden="true">◈</span><strong>Estudiar</strong></button>
+        <button type="button" data-nav="duplicates" aria-label="Similares"><span aria-hidden="true">◎</span><strong>Similares</strong></button>
+      </nav>
+      <p class="side-note">Tus temas y fuentes permanecen en esta biblioteca local.</p>
     </aside>
 
     <main class="main">
       <div class="heading">
         <div class="eyebrow">EXPLORA TU CONOCIMIENTO</div>
-        <h1>Cada decisión tiene una raíz.</h1>
-        <p>Ramas, temas y relaciones que has guardado en tu biblioteca.</p>
+        <h1>Tu biblioteca de póker, a tu ritmo.</h1>
+        <p>Explora el mapa, guarda tus apuntes y consulta las fuentes cuando quieras.</p>
       </div>
+
+      <nav class="quick-actions" aria-label="Empezar">
+        <button type="button" data-quick="map"><span>01</span><strong>Explorar el mapa</strong><small>Recorre ramas y temas</small></button>
+        <button type="button" data-quick="import"><span>02</span><strong>Importar un DOCX</strong><small>Conserva el original y sus fuentes</small></button>
+        <button type="button" data-quick="create"><span>03</span><strong>Crear un tema</strong><small>Organiza tu teoría sin modelo</small></button>
+      </nav>
 
       <section class="scene-title" aria-label="Escenario actual">
         <span class="scene-number" id="sceneNumber">01</span>
@@ -47,7 +60,14 @@
         <div class="tree-region" id="treeRegion" aria-live="polite">
           <div class="tree-message" role="status">Cargando tu biblioteca…</div>
         </div>
-        <div class="map-footer"><span>Selecciona una ficha para explorar</span><span class="mobile-scroll-hint">Desliza el árbol hacia los lados</span><span>Los temas repetidos en ramas comparten un único registro</span></div>
+        <div class="map-footer"><span>Todas las ramas están visibles. Elige un concepto para ver sus detalles.</span><span>Los temas repetidos en ramas comparten un único registro</span></div>
+      </section>
+
+      <section class="detail" id="detail" aria-live="polite" aria-label="Tema seleccionado">
+        <div class="detail-head"><div><div class="eyebrow" id="path">TU BIBLIOTECA</div><h3 id="detailTitle">Elige una ficha</h3></div><span class="detail-suit" aria-hidden="true">♠</span></div>
+        <p class="detail-summary" id="detailText">Explora los temas y sus ubicaciones en el mapa.</p>
+        <div class="detail-meta" id="detailMeta"></div>
+        <div class="detail-links" id="detailLinks"></div>
       </section>
 
       <section class="workspace" aria-label="Herramientas de biblioteca">
@@ -60,12 +80,6 @@
           <button type="button" role="tab" data-view="duplicates" aria-selected="false">Similares</button>
         </div>
         <div class="workspace-body" id="workspaceBody" role="tabpanel" aria-live="polite"></div>
-      </section>
-      <section class="detail" id="detail" aria-live="polite" aria-label="Tema seleccionado">
-        <div class="detail-head"><div><div class="eyebrow" id="path">TU BIBLIOTECA</div><h3 id="detailTitle">Elige una ficha</h3></div><span class="detail-suit" aria-hidden="true">♠</span></div>
-        <p class="detail-summary" id="detailText">Explora los temas y sus ubicaciones en el mapa.</p>
-        <div class="detail-meta" id="detailMeta"></div>
-        <div class="detail-links" id="detailLinks"></div>
       </section>
       <p class="illustration-note">Las escenas son ilustraciones de navegación. El contenido de teoría procede únicamente de la biblioteca local.</p>
     </main>

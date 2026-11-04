@@ -1,8 +1,9 @@
 // Browser workflows use the same local API as the tree. Saved text is inserted as text.
 const workspaceBody = document.querySelector('#workspaceBody');
 const workspaceTabs = [...document.querySelectorAll('[data-view]')];
+const navigationButtons = [...document.querySelectorAll('[data-nav]')];
 const workspace = { view: 'import', topicId: null, documentId: null, documents: [],
-  documentStates: new Map(), timer: null, request: 0 };
+  documentStates: new Map(), timer: null, request: 0, creating: false, editing: false, modelConfigured: null };
 
 function ui(tag, className = '', value) {
   const node = document.createElement(tag);
@@ -29,7 +30,7 @@ const importStates = {
   analyzing: 'Analizando', completed: 'Completado', failed: 'Falló',
 };
 function importHelp(doc) {
-  if (doc.state === 'awaiting_model') return 'La extracción terminó. Configura POKER_ROOTS_MODEL, reinicia la API y pulsa Analizar.';
+  if (doc.state === 'awaiting_model') return 'La extracción terminó. Ya puedes leer las fuentes y crear temas manualmente.';
   if (doc.state === 'failed') return 'La importación falló. Revisa el error y pulsa Reintentar.';
   if (doc.state === 'completed') return 'Los temas están guardados y listos para revisar.';
   if (['queued', 'extracting', 'analyzing'].includes(doc.state)) return 'Puedes seguir navegando mientras se procesa el documento.';
@@ -61,18 +62,39 @@ function field(label, value = '', multiline = false) {
   wrapper.append(ui('span', '', label), control);
   return { wrapper, control };
 }
+function setNavigation(target) {
+  navigationButtons.forEach(item => {
+    if (item.dataset.nav === target) item.setAttribute('aria-current', 'page');
+    else item.removeAttribute('aria-current');
+  });
+}
 function setView(view) {
   clearTimeout(workspace.timer);
   workspace.view = view;
+  if (view !== 'reader') workspace.creating = false;
   workspace.request += 1;
   workspaceTabs.forEach(tab => tab.setAttribute('aria-selected', String(tab.dataset.view === view)));
+  setNavigation(view);
   const views = { import: renderImport, reader: renderReader, sources: renderSources,
     search: renderSearch, study: renderStudy, duplicates: renderDuplicates };
   views[view]();
 }
 
 async function renderImport() {
-  heading('Importar teoría', 'Añade un DOCX. La extracción y el análisis se ejecutan en segundo plano.');
+  const version = workspace.request;
+  heading('Tus documentos', 'Guarda el DOCX original y consulta sus fragmentos. Puedes crear temas manualmente mientras no haya modelo local.');
+  const modelBanner = ui('p', 'work-note model-banner', 'Comprobando el estado del análisis automático…');
+  workspaceBody.append(modelBanner);
+  try {
+    const health = await api('/api/health');
+    workspace.modelConfigured = Boolean(health.model_configured);
+    modelBanner.textContent = workspace.modelConfigured ?
+      'El análisis automático está configurado. También puedes crear y corregir temas manualmente.' :
+      'Modo manual: tus documentos y fuentes están disponibles. El análisis automático se activará cuando configures un modelo local.';
+  } catch {
+    modelBanner.textContent = 'No se pudo consultar el estado del análisis. La importación manual sigue disponible.';
+  }
+  if (version !== workspace.request) return;
   const form = ui('form', 'work-form');
   const file = ui('input');
   file.type = 'file'; file.accept = '.docx'; file.required = true;
@@ -115,19 +137,23 @@ async function renderImport() {
         const actions = ui('div', 'work-actions');
         card.append(actions);
         actions.append(documentLink(doc.id, 'Original'), button('Ver fuentes', () => openDocument(doc.id)));
-        if (doc.state === 'awaiting_model' || doc.state === 'extracted') {
+        if ((doc.state === 'awaiting_model' || doc.state === 'extracted') && workspace.modelConfigured) {
           actions.append(button('Analizar', () => runDocumentAction(doc.id, 'analyze')));
         }
-        if (doc.state === 'failed') actions.append(button('Reintentar', () => runDocumentAction(doc.id, 'retry')));
-        if (doc.state === 'completed') {
-          actions.append(button('Ver temas', async () => {
-            try {
-              const data = await api(`/api/documents/${safePath(doc.id)}/topics`);
-              if (data.topics.length) openTopic(data.topics[0].id);
-              else note(card, 'Este documento no tiene temas asociados.');
-            } catch (error) { note(card, errorText(error), 'error'); }
-          }));
+        if (doc.state === 'awaiting_model' || doc.state === 'extracted') {
+          actions.append(button('Crear tema con esta fuente', () => {
+            workspace.documentId = doc.id; workspace.creating = true; setView('reader');
+            document.querySelector('.workspace').scrollIntoView({ block: 'start' });
+          }, 'work-action-emphasis'));
         }
+        if (doc.state === 'failed') actions.append(button('Reintentar', () => runDocumentAction(doc.id, 'retry')));
+        actions.append(button('Ver temas', async () => {
+          try {
+            const data = await api(`/api/documents/${safePath(doc.id)}/topics`);
+            if (data.topics.length) openTopic(data.topics[0].id);
+            else note(card, 'Este documento aún no tiene temas. Puedes crear uno con una de sus fuentes.');
+          } catch (error) { note(card, errorText(error), 'error'); }
+        }));
         list.append(top);
       }
       if (workspace.view === 'import' && workspace.documents.some(doc => ['queued', 'extracting', 'analyzing'].includes(doc.state))) {
@@ -144,6 +170,8 @@ async function renderImport() {
 
 function openTopic(topicId) {
   workspace.topicId = topicId;
+  workspace.creating = false;
+  workspace.editing = false;
   const topic = state.topics.find(item => item.id === topicId);
   if (topic) focusTopic(topicId);
   setView('reader');
@@ -151,15 +179,96 @@ function openTopic(topicId) {
 }
 function openDocument(documentId) { workspace.documentId = documentId; setView('sources'); }
 
+async function renderCreateTopic() {
+  const version = workspace.request;
+  heading('Crear un tema', 'Escribe tu teoría y, si procede de un documento, enlaza un fragmento. El tema aparecerá en el mapa al guardarlo.');
+  const cancel = button('← Volver a mis temas', () => { workspace.creating = false; setView('reader'); }, 'work-quiet');
+  workspaceBody.append(cancel);
+  const form = ui('form', 'work-editor work-create');
+  const title = field('Título del tema'); title.control.required = true;
+  const summary = field('Idea principal', '', true);
+  const explanation = field('Explicación', '', true);
+  const conditions = field('Cuándo se aplica', '', true);
+  form.append(title.wrapper, summary.wrapper, explanation.wrapper, conditions.wrapper);
+  const difficulty = ui('select');
+  for (const [value, label] of [['basic', 'Básico'], ['intermediate', 'Intermedio'], ['advanced', 'Avanzado']]) {
+    const option = ui('option', '', label); option.value = value; difficulty.append(option);
+  }
+  const difficultyLabel = add(ui('label', 'work-field'), ui('span', '', 'Dificultad'), difficulty);
+  const branch = ui('select');
+  const noBranch = ui('option', '', 'Sin rama por ahora'); noBranch.value = ''; branch.append(noBranch);
+  for (const item of state.branches) {
+    const option = ui('option', '', item.name); option.value = item.id; branch.append(option);
+  }
+  const branchLabel = add(ui('label', 'work-field'), ui('span', '', 'Lugar en el mapa'), branch);
+  form.append(difficultyLabel, branchLabel);
+  const sourceGroup = ui('div', 'work-source-picker');
+  sourceGroup.append(ui('h4', '', 'Fuente de apoyo'), ui('p', 'work-note', 'Elige un fragmento si el tema procede de un DOCX. Puedes dejarlo vacío para completar la fuente más adelante.'));
+  const documentPicker = ui('select', 'work-select');
+  const noDocument = ui('option', '', 'Sin documento'); noDocument.value = ''; documentPicker.append(noDocument);
+  const fragmentPicker = ui('select', 'work-select');
+  const noFragment = ui('option', '', 'Sin fragmento'); noFragment.value = ''; fragmentPicker.append(noFragment);
+  sourceGroup.append(add(ui('label', 'work-field'), ui('span', '', 'Documento'), documentPicker),
+    add(ui('label', 'work-field'), ui('span', '', 'Fragmento'), fragmentPicker));
+  form.append(sourceGroup);
+  const feedback = ui('p', 'work-note');
+  const save = ui('button', 'work-primary', 'Guardar tema en el mapa'); save.type = 'submit';
+  form.append(save, feedback);
+  workspaceBody.append(form);
+  try {
+    const documents = (await api('/api/documents')).documents;
+    if (version !== workspace.request) return;
+    for (const doc of documents) {
+      const option = ui('option', '', doc.filename); option.value = doc.id; documentPicker.append(option);
+    }
+    documentPicker.value = documents.some(doc => doc.id === workspace.documentId) ? workspace.documentId : '';
+    async function loadFragments() {
+      const documentId = documentPicker.value;
+      const emptyFragment = ui('option', '', 'Sin fragmento'); emptyFragment.value = '';
+      fragmentPicker.replaceChildren(emptyFragment);
+      fragmentPicker.disabled = !documentId;
+      if (!documentId) return;
+      try {
+        const fragments = (await api(`/api/documents/${safePath(documentId)}/fragments`)).fragments;
+        if (version !== workspace.request || documentId !== documentPicker.value) return;
+        for (const fragment of fragments.filter(item => item.kind !== 'image')) {
+          const preview = fragment.content.replace(/\s+/g, ' ').slice(0, 100);
+          const option = ui('option', '', `${fragment.ordinal + 1}. ${preview || fragment.kind}`);
+          option.value = fragment.id; fragmentPicker.append(option);
+        }
+      } catch (error) { feedback.textContent = `No se cargaron los fragmentos: ${errorText(error)}`; }
+    }
+    documentPicker.addEventListener('change', loadFragments);
+    await loadFragments();
+  } catch (error) { feedback.textContent = `No se cargaron los documentos: ${errorText(error)}`; }
+  form.addEventListener('submit', async event => {
+    event.preventDefault(); save.disabled = true; feedback.textContent = 'Guardando tema…';
+    try {
+      const topic = await post('/api/topics', {
+        title: title.control.value.trim(), summary: summary.control.value.trim(),
+        explanation: explanation.control.value.trim(), conditions: conditions.control.value.trim(),
+        difficulty: difficulty.value, review_status: 'proposed',
+        branch_id: branch.value || null, source_fragment_id: fragmentPicker.value || null,
+      });
+      workspace.topicId = topic.id; workspace.creating = false;
+      await loadTree(); setView('reader');
+      note(workspaceBody, 'Tema guardado. Puedes corregirlo y completar sus relaciones.', 'success');
+    } catch (error) { feedback.textContent = `No se guardó: ${errorText(error)}`; feedback.classList.add('error'); }
+    finally { save.disabled = false; }
+  });
+}
+
 async function renderReader() {
-  heading('Tema y corrección', 'Lee el contenido guardado y corrige sus campos y relaciones en un solo guardado.');
+  if (workspace.creating) return renderCreateTopic();
+  heading('Leer un tema', 'Consulta primero el contenido y sus fuentes. Puedes abrir la edición cuando necesites corregirlo.');
+  workspaceBody.append(button('＋ Crear tema', () => { workspace.creating = true; setView('reader'); }, 'work-primary'));
   const picker = ui('select', 'work-select');
   picker.append(ui('option', '', 'Selecciona un tema'));
   for (const topic of state.topics) {
     const option = ui('option', '', topic.title); option.value = topic.id; picker.append(option);
   }
   picker.value = workspace.topicId || '';
-  picker.addEventListener('change', () => { workspace.topicId = picker.value || null; renderReader(); });
+  picker.addEventListener('change', () => { workspace.topicId = picker.value || null; workspace.editing = false; renderReader(); });
   workspaceBody.append(picker);
   if (!workspace.topicId) { note(workspaceBody, 'Abre un tema del árbol o selecciónalo aquí.'); return; }
   const version = workspace.request;
@@ -170,6 +279,18 @@ async function renderReader() {
     const topic = await api(`/api/topics/${safePath(workspace.topicId)}`);
     if (version !== workspace.request) return;
     area.replaceChildren();
+    if (!workspace.editing) {
+      const reading = ui('article', 'topic-reading');
+      reading.append(ui('div', 'eyebrow', 'TEMA GUARDADO'), ui('h4', '', topic.title));
+      const summary = ui('p', 'topic-reading-summary', topic.summary || 'Este tema aún no tiene una idea principal.');
+      reading.append(summary);
+      if (topic.explanation) reading.append(ui('h5', '', 'Explicación'), ui('p', 'work-source-text', topic.explanation));
+      if (topic.conditions) reading.append(ui('h5', '', 'Cuándo se aplica'), ui('p', 'work-source-text', topic.conditions));
+      if (topic.tags.length) reading.append(ui('p', 'topic-reading-tags', `Etiquetas: ${topic.tags.join(' · ')}`));
+      reading.append(ui('p', 'subtle', `Dificultad: ${{ basic: 'básico', intermediate: 'intermedio', advanced: 'avanzado' }[topic.difficulty] || topic.difficulty} · Revisión: ${topic.review_status}`));
+      area.append(reading, button('Editar este tema', () => { workspace.editing = true; renderReader(); }, 'work-primary'));
+    } else {
+    area.append(button('← Volver a lectura', () => { workspace.editing = false; renderReader(); }, 'work-quiet'));
     const form = ui('form', 'work-editor');
     const controls = {};
     for (const [key, label, multiline] of [
@@ -231,17 +352,22 @@ async function renderReader() {
       try {
         await api(`/api/topics/${safePath(topic.id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         await loadTree();
+        workspace.editing = false;
         await renderReader();
         note(workspaceBody, 'Cambios guardados.', 'success');
       } catch (error) { feedback.textContent = `No se guardó: ${errorText(error)}`; feedback.classList.add('error'); }
       finally { save.disabled = false; }
     });
     area.append(form);
+    }
     const evidence = ui('div', 'work-list');
     evidence.append(ui('h4', '', 'Referencias y revisión'));
     area.append(evidence);
     if (!topic.evidence.length) note(evidence, 'Este tema no tiene fragmentos fuente asociados.');
-    for (const item of topic.evidence) evidence.append(button(`${item.role} · ${item.fragment_id.slice(0, 10)}`, () => openSourceFragment(item.fragment_id)));
+    for (const [index, item] of topic.evidence.entries()) {
+      const role = { supports: 'apoya', context: 'da contexto', contradicts: 'contradice' }[item.role] || item.role;
+      evidence.append(button(`Abrir fuente ${index + 1} · ${role}`, () => openSourceFragment(item.fragment_id)));
+    }
     if (topic.unknowns.length) note(evidence, `Datos desconocidos: ${topic.unknowns.join(', ')}`);
     if (topic.contradictions.length) note(evidence, `Contradicciones registradas: ${topic.contradictions.length}`);
     if (topic.similar_candidates.length) evidence.append(button(`${topic.similar_candidates.length} posibles similares`, () => setView('duplicates')));
@@ -279,10 +405,26 @@ async function renderSources() {
     area.append(list);
     const fragments = (await api(`/api/documents/${safePath(workspace.documentId)}/fragments`)).fragments;
     if (!fragments.length) note(list, 'Aún no hay fragmentos extraídos.');
+    else note(list, `${fragments.length} ${fragments.length === 1 ? 'fragmento' : 'fragmentos'} conservados en el orden del documento.`);
     for (const fragment of fragments) {
       const card = ui('article', 'work-card'); card.id = `fragment-${fragment.id}`;
-      card.append(ui('strong', '', `${fragment.ordinal + 1}. ${fragment.kind} · ${fragment.locator}`));
-      if (fragment.content) card.append(ui('p', 'work-source-text', fragment.content));
+      const kind = { paragraph: 'Párrafo', table: 'Tabla', image: 'Imagen' }[fragment.kind] || fragment.kind;
+      card.append(ui('strong', '', `${fragment.ordinal + 1}. ${kind}`),
+        ui('p', 'source-locator', `Referencia: ${fragment.locator}`));
+      if (fragment.kind === 'table') {
+        try {
+          const rows = JSON.parse(fragment.content);
+          if (!Array.isArray(rows)) throw new Error('Invalid table');
+          const table = ui('table', 'source-table');
+          for (const row of rows) {
+            if (!Array.isArray(row)) throw new Error('Invalid table row');
+            const tr = ui('tr');
+            for (const cell of row) tr.append(ui('td', '', String(cell)));
+            table.append(tr);
+          }
+          const tableScroll = ui('div', 'source-table-scroll'); tableScroll.append(table); card.append(tableScroll);
+        } catch { card.append(ui('p', 'work-source-text', fragment.content)); }
+      } else if (fragment.content) card.append(ui('p', 'work-source-text', fragment.content));
       if (fragment.image_name) {
         const image = ui('img', 'work-image'); image.alt = fragment.content || 'Imagen extraída del documento';
         image.src = `/api/documents/${safePath(fragment.document_id)}/images/${safePath(fragment.image_name)}`;
@@ -298,8 +440,23 @@ async function renderSources() {
   } catch (error) { area.replaceChildren(ui('p', 'work-note error', errorText(error))); }
 }
 
-function renderSearch() {
-  heading('Buscar en tu teoría', 'Pregunta al modelo local; la respuesta debe citar fragmentos de tus documentos.');
+async function renderSearch() {
+  const version = workspace.request;
+  heading('Buscar en tu teoría', 'La respuesta generada necesita un modelo local y debe citar fragmentos de tus documentos.');
+  try {
+    const health = await api('/api/health');
+    if (version !== workspace.request) return;
+    workspace.modelConfigured = Boolean(health.model_configured);
+    if (!workspace.modelConfigured) {
+      note(workspaceBody, 'La búsqueda con respuestas todavía no está disponible. Mientras tanto, puedes recorrer el árbol y leer los fragmentos originales.');
+      workspaceBody.append(button('Ver fuentes originales', () => setView('sources'), 'work-primary'));
+      return;
+    }
+  } catch {
+    if (version !== workspace.request) return;
+    note(workspaceBody, 'No se pudo consultar el estado del modelo local. Comprueba que el servidor esté disponible.', 'error');
+    return;
+  }
   const form = ui('form', 'work-form'); const query = ui('input');
   query.type = 'search'; query.placeholder = 'Ej. BB vs BTN en flop Axx'; query.required = true;
   const submit = ui('button', 'work-primary', 'Buscar'); submit.type = 'submit';
@@ -397,5 +554,30 @@ async function renderDuplicates() {
   } catch (error) { note(area, errorText(error), 'error'); }
 }
 
-workspaceTabs.forEach(tab => tab.addEventListener('click', () => setView(tab.dataset.view)));
+workspaceTabs.forEach(tab => tab.addEventListener('click', () => {
+  workspace.creating = false;
+  setView(tab.dataset.view);
+}));
+navigationButtons.forEach(item => item.addEventListener('click', () => {
+  const target = item.dataset.nav;
+  if (target === 'map') {
+    setNavigation('map');
+    document.querySelector('.map-shell').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return;
+  }
+  workspace.creating = false;
+  setView(target);
+  document.querySelector('.workspace').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}));
+document.querySelectorAll('[data-quick]').forEach(action => action.addEventListener('click', () => {
+  if (action.dataset.quick === 'map') {
+    setNavigation('map');
+    document.querySelector('.map-shell').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return;
+  }
+  if (action.dataset.quick === 'create') workspace.creating = true;
+  setView(action.dataset.quick === 'create' ? 'reader' : 'import');
+  document.querySelector('.workspace').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}));
 setView('import');
+setNavigation('map');
