@@ -14,6 +14,7 @@ from .imports import ImportService
 from .local_model import LocalModel, ModelUnavailable
 from .retrieval_index import RetrievalIndexer
 from .search import SearchFailure, SearchService
+from .study_path import StudyPathService
 from .storage import Store, StoreError
 
 
@@ -32,6 +33,7 @@ class PokerRootsServer(ThreadingHTTPServer):
         self.indexer = RetrievalIndexer(store, selected_model)
         self.imports = ImportService(store, selected_model, self.indexer)
         self.search = SearchService(store, selected_model)
+        self.study_path = StudyPathService(store)
 
     def server_close(self) -> None:
         self.imports.close()
@@ -100,7 +102,7 @@ class Handler(BaseHTTPRequestHandler):
     def _handle(self, method: str) -> None:
         try:
             result = self._route(method, self._segments())
-            if method in {"POST", "PUT", "DELETE"} and self._segments() != ["api", "search"]:
+            if method in {"POST", "PUT", "DELETE"} and self._segments() not in (["api", "search"], ["api", "study-path"]):
                 self.server.indexer.schedule()
             if result is SENT_FILE:
                 return
@@ -138,6 +140,8 @@ class Handler(BaseHTTPRequestHandler):
             return {"status": "ok", "database_version": 3, "model_configured": self.server.imports.model.configured}
         if parts == ["api", "search"] and method == "POST":
             return self.server.search.search(self._json())
+        if parts == ["api", "study-path"] and method == "POST":
+            return self.server.study_path.build(self._json())
         if parts == ["api", "index", "status"] and method == "GET":
             return store.index_status(getattr(self.server.indexer.model, "embedding_name", ""))
         if parts == ["api", "index", "retry"] and method == "POST":

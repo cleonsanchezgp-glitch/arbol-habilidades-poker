@@ -16,6 +16,7 @@ from backend.imports import ImportService
 from backend.local_model import LocalModel, ModelUnavailable
 from backend.retrieval_index import RetrievalIndexer
 from backend.search import SearchFailure, SearchService
+from backend.study_path import StudyPathService
 from backend.topic_processor import TopicProcessor
 from backend.storage import Store, StoreError
 
@@ -271,6 +272,13 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status, 502)
         self.assertEqual(result["status"], "search_failed")
 
+    def test_study_path_api_reports_no_evidence(self):
+        self.store.create_topic({"title": "Rangos", "difficulty": "basic"})
+        status, result = self.request("POST", "/api/study-path", {"goal": "principiante"})
+        self.assertEqual(status, 200)
+        self.assertEqual((result["status"], result["reason"]),
+                         ("insufficient_coverage", "no_sourced_topics"))
+
     def test_atomic_topic_edit_refreshes_tree_and_locations(self):
         root = self.store.create_branch("Fundamentos")
         child = self.store.create_branch("Postflop", root["id"])
@@ -493,6 +501,73 @@ class SearchTests(unittest.TestCase):
         self.assertEqual(result["status"], "answered")
         self.assertEqual(result["source_fragment_ids"], [fragment["id"]])
         self.assertEqual(result["retrieval_warnings"], [])
+
+
+class StudyPathTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.store = Store(Path(self.temp.name))
+        self.service = StudyPathService(self.store)
+        self.document, _ = self.store.save_document("lesson.docx", b"source")
+
+    def sourced_topic(self, title, difficulty, content):
+        fragment = self.store.add_fragments(self.document["id"], [
+            {"kind": "paragraph", "locator": title, "content": content},
+        ])[0]
+        topic = self.store.create_topic({"title": title, "difficulty": difficulty})
+        self.store.link_evidence(topic["id"], fragment["id"])
+        return topic, fragment
+
+    def test_beginner_and_goal_paths_keep_prerequisites_and_source_links(self):
+        prerequisite, source_one = self.sourced_topic("Z conceptos", "advanced", "Conceptos base")
+        dependent, source_two = self.sourced_topic("A juego Axx", "basic", "Juego en flop Axx")
+        self.store.add_prerequisite(dependent["id"], prerequisite["id"])
+        branch = self.store.create_branch("Postflop")
+        self.store.place_topic(dependent["id"], branch["id"])
+
+        for goal in ("principiante", "Axx"):
+            path = self.service.build({"goal": goal})
+            self.assertEqual(path["status"], "ready")
+            self.assertEqual([step["topic_id"] for step in path["steps"]],
+                             [prerequisite["id"], dependent["id"]])
+            self.assertIn("A juego Axx", path["steps"][0]["reason"])
+            self.assertEqual(path["steps"][0]["sources"][0]["fragment_id"], source_one["id"])
+            self.assertEqual(path["steps"][1]["sources"][0]["fragment_id"], source_two["id"])
+            self.assertEqual(path["steps"][1]["sources"][0]["document_url"],
+                             f"/api/documents/{self.document['id']}/file")
+            self.assertEqual(path["steps"][1]["topic_url"], f"/api/topics/{dependent['id']}")
+            self.assertEqual(path["steps"][1]["locations"][0]["path"][0]["name"], "Postflop")
+
+    def test_unsourced_prerequisite_blocks_a_sourced_target(self):
+        missing = self.store.create_topic({"title": "Concepto sin fuente", "difficulty": "basic"})
+        target, _ = self.sourced_topic("Juego Axx", "basic", "Juego en flop Axx")
+        self.store.add_prerequisite(target["id"], missing["id"])
+        result = self.service.build({"goal": "Axx"})
+        self.assertEqual((result["status"], result["reason"]),
+                         ("insufficient_coverage", "no_evidence"))
+        self.assertEqual(result["steps"], [])
+        self.assertEqual(result["excluded"][0]["reason"], "unsourced_prerequisite")
+        self.assertEqual(result["excluded"][0]["missing_topic_ids"], [missing["id"]])
+        unsourced = self.service.build({"goal": "Concepto sin fuente"})
+        self.assertEqual(unsourced["excluded"][0]["reason"], "no_evidence")
+        self.assertEqual(self.service.build({"goal": "inexistente"})["reason"], "no_matching_topics")
+
+    def test_image_only_evidence_does_not_create_a_study_step(self):
+        image = self.store.add_fragments(self.document["id"], [
+            {"kind": "image", "locator": "image1", "content": "", "image_name": "image.png"},
+        ])[0]
+        topic = self.store.create_topic({"title": "Imagen", "difficulty": "basic"})
+        self.store.link_evidence(topic["id"], image["id"])
+        self.assertEqual(self.service.build({"goal": "beginner"})["reason"], "no_sourced_topics")
+
+    def test_contradicting_source_alone_does_not_support_a_study_step(self):
+        fragment = self.store.add_fragments(self.document["id"], [
+            {"kind": "paragraph", "locator": "p1", "content": "Ejemplo Axx"},
+        ])[0]
+        topic = self.store.create_topic({"title": "Axx", "difficulty": "basic"})
+        self.store.link_evidence(topic["id"], fragment["id"], "contradicts")
+        self.assertEqual(self.service.build({"goal": "Axx"})["reason"], "no_sourced_topics")
 
 
 class FakeModel:
