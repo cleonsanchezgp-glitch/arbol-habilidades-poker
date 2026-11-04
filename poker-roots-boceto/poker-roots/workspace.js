@@ -81,7 +81,8 @@ async function renderImport() {
     finally { submit.disabled = false; }
   });
   workspaceBody.append(form, feedback);
-  const list = add(workspaceBody, ui('div', 'work-list'));
+  const list = ui('div', 'work-list');
+  workspaceBody.append(list);
   async function loadDocuments() {
     try {
       workspace.documents = (await api('/api/documents')).documents;
@@ -92,7 +93,8 @@ async function renderImport() {
         const top = add(card, ui('strong', '', doc.filename), ui('span', 'work-status', doc.state));
         if (doc.error) note(card, doc.error, 'error');
         for (const warning of doc.warnings || []) note(card, warning);
-        const actions = add(card, ui('div', 'work-actions'));
+        const actions = ui('div', 'work-actions');
+        card.append(actions);
         actions.append(documentLink(doc.id, 'Original'), button('Ver fuentes', () => openDocument(doc.id)));
         if (doc.state === 'awaiting_model' || doc.state === 'extracted') {
           actions.append(button('Analizar', () => runDocumentAction(doc.id, 'analyze')));
@@ -142,7 +144,8 @@ async function renderReader() {
   workspaceBody.append(picker);
   if (!workspace.topicId) { note(workspaceBody, 'Abre un tema del árbol o selecciónalo aquí.'); return; }
   const version = workspace.request;
-  const area = add(workspaceBody, ui('div'));
+  const area = ui('div');
+  workspaceBody.append(area);
   note(area, 'Cargando tema…');
   try {
     const topic = await api(`/api/topics/${safePath(workspace.topicId)}`);
@@ -215,7 +218,9 @@ async function renderReader() {
       finally { save.disabled = false; }
     });
     area.append(form);
-    const evidence = add(area, ui('div', 'work-list'), ui('h4', '', 'Referencias y revisión'));
+    const evidence = ui('div', 'work-list');
+    evidence.append(ui('h4', '', 'Referencias y revisión'));
+    area.append(evidence);
     if (!topic.evidence.length) note(evidence, 'Este tema no tiene fragmentos fuente asociados.');
     for (const item of topic.evidence) evidence.append(button(`${item.role} · ${item.fragment_id.slice(0, 10)}`, () => openSourceFragment(item.fragment_id)));
     if (topic.unknowns.length) note(evidence, `Datos desconocidos: ${topic.unknowns.join(', ')}`);
@@ -237,7 +242,8 @@ async function openSourceFragment(fragmentId) {
 }
 async function renderSources() {
   heading('Fuentes originales', 'Consulta el archivo conservado y sus fragmentos extraídos en orden.');
-  const area = add(workspaceBody, ui('div'));
+  const area = ui('div');
+  workspaceBody.append(area);
   note(area, 'Cargando fuentes…');
   try {
     const documents = (await api('/api/documents')).documents;
@@ -250,7 +256,8 @@ async function renderSources() {
     picker.value = workspace.documentId;
     picker.addEventListener('change', () => { workspace.documentId = picker.value; workspace.fragmentId = null; renderSources(); });
     area.append(picker, documentLink(workspace.documentId, 'Descargar original'));
-    const list = add(area, ui('div', 'work-list'));
+    const list = ui('div', 'work-list');
+    area.append(list);
     const fragments = (await api(`/api/documents/${safePath(workspace.documentId)}/fragments`)).fragments;
     if (!fragments.length) note(list, 'Aún no hay fragmentos extraídos.');
     for (const fragment of fragments) {
@@ -337,7 +344,8 @@ function renderStudy() {
 
 async function renderDuplicates() {
   heading('Revisar similares', 'Compara propuestas similares antes de decidir si conservas ambos temas. No se fusionan automáticamente.');
-  const area = add(workspaceBody, ui('div', 'work-list'));
+  const area = ui('div', 'work-list');
+  workspaceBody.append(area);
   try {
     const topics = (await api('/api/topics')).topics;
     const byId = new Map(topics.map(topic => [topic.id, topic]));
