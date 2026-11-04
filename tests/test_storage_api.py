@@ -230,6 +230,22 @@ class ApiTests(unittest.TestCase):
             time.sleep(0.01)
         self.fail("Document processing did not finish")
 
+    def test_local_ui_is_served_with_api_and_only_allowlisted_assets(self):
+        with urlopen(self.base + "/", timeout=5) as response:
+            page = response.read().decode("utf-8")
+            self.assertIn("id=\"treeRegion\"", page)
+            self.assertIn("text/html", response.headers["Content-Type"])
+        with urlopen(self.base + "/app.js", timeout=5) as response:
+            script = response.read().decode("utf-8")
+            self.assertIn("fetch('/api/tree'", script)
+            self.assertNotIn("const nodes=[", script)
+        with urlopen(self.base + "/assets/drawn-0.jpg", timeout=5) as response:
+            self.assertEqual(response.headers["Content-Type"], "image/jpeg")
+        with self.assertRaises(HTTPError) as error:
+            urlopen(self.base + "/backend/storage.py", timeout=5)
+        self.assertEqual(error.exception.code, 404)
+        error.exception.close()
+
     def test_topic_api_and_failed_update(self):
         status, topic = self.request("POST", "/api/topics", {"title": "Rangos", "difficulty": "basic"})
         self.assertEqual(status, 201)

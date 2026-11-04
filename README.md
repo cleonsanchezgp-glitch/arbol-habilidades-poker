@@ -1,10 +1,10 @@
 # Poker Roots — Texas Hold'em study library
 
-Local application in progress for organizing user-imported Texas Hold'em theory. The `poker-roots-boceto/` directory is the supplied visual prototype; it contains sample content, not imported theory. Project scope, architecture, and planned work are in `_context/`.
+Local application in progress for organizing user-imported Texas Hold'em theory. The supplied illustrations and visual direction live in `poker-roots-boceto/poker-roots/`; its running tree now reads the local API instead of example theory. Project scope, architecture, and planned work are in `_context/`.
 
 ## Current executable foundation
 
-WP-001 provides a durable SQLite store and a loopback HTTP API using Python's standard library. WP-002 adds DOCX validation and background extraction. WP-003 adds source-linked topic proposals through a locally configured Ollama-compatible text model. WP-005 adds a local FTS5 index, background embeddings when a local embedding model is configured, source-linked search, and prerequisite-ordered study paths. The application stores original document bytes, ordered source fragments, extractable images, topics, evidence links, strategic facets, branches, placements, and acyclic prerequisite relations. Data survives process restarts. Prototype integration remains planned.
+WP-001 provides a durable SQLite store and a loopback HTTP API using Python's standard library. WP-002 adds DOCX validation and background extraction. WP-003 adds source-linked topic proposals through a locally configured Ollama-compatible text model. WP-005 adds a local FTS5 index, background embeddings when a local embedding model is configured, source-linked search, and prerequisite-ordered study paths. The visual tree now renders saved branches, topics, placements, and prerequisites. The application stores original document bytes, ordered source fragments, extractable images, topics, evidence links, strategic facets, branches, placements, and acyclic prerequisite relations. Data survives process restarts. Import, editing, search, and study views in the browser remain planned.
 
 Python 3.10 or newer is required. No package installation is needed for this foundation.
 
@@ -14,7 +14,7 @@ $env:POKER_ROOTS_EMBEDDING_MODEL = "your-installed-local-embedding-model"
 python -m backend.api --data-dir .poker-roots-data --port 8765
 ```
 
-Open `http://127.0.0.1:8765/api/health` to check the server. The data directory defaults to `%LOCALAPPDATA%\PokerRoots` on Windows (or the user data directory on other systems) when `--data-dir` and `POKER_ROOTS_DATA_DIR` are not provided. Keep this directory to retain the library across restarts; back it up before replacing the machine or deleting user data.
+Open `http://127.0.0.1:8765/` for the visual tree and `/api/health` to check the server. The page and API share the same local origin; opening `index.html` as a file does not load the library. The data directory defaults to `%LOCALAPPDATA%\PokerRoots` on Windows (or the user data directory on other systems) when `--data-dir` and `POKER_ROOTS_DATA_DIR` are not provided. Keep this directory to retain the library across restarts; back it up before replacing the machine or deleting user data.
 
 Run a compatible model service on `http://127.0.0.1:11434`, or set `POKER_ROOTS_OLLAMA_URL` to another loopback HTTP address. Set `POKER_ROOTS_MODEL` to the name of a model actually installed there. The current environment has no reachable local model, so generation has been checked with a simulated model; quality on real theory remains unverified. Without configuration, DOCX extraction succeeds and the document waits in `awaiting_model`. After configuring the service and restarting, call its `/analyze` endpoint. Generated topics are marked `proposed` for manual review. Images are retained as source assets but are not interpreted by the text model.
 
@@ -59,4 +59,4 @@ The upload endpoint validates the DOCX package and responds `202 Accepted` with 
 python -m unittest discover -s tests -v
 ```
 
-The tests use disposable data directories, synthetic DOCX packages, and simulated local models. They check extraction order, image access, invalid-file rejection, persistence after reopening the store, duplicate document hashes, atomic fragment writes, source-linked multi-topic proposals, numeric-detail rejection, cycle rejection, API error handling, FTS5 refresh and migration, local embedding calls, retry after embedding failure, semantic and lexical retrieval, clarification, insufficient coverage, source-reference validation, and evidence-bounded prerequisite study paths.
+The tests use disposable data directories, synthetic DOCX packages, and simulated local models. They check extraction order, image access, invalid-file rejection, persistence after reopening the store, duplicate document hashes, atomic fragment writes, source-linked multi-topic proposals, numeric-detail rejection, cycle rejection, API error handling, FTS5 refresh and migration, local embedding calls, retry after embedding failure, semantic and lexical retrieval, clarification, insufficient coverage, source-reference validation, evidence-bounded prerequisite study paths, and same-origin serving of the visual tree.

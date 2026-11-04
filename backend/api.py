@@ -21,6 +21,8 @@ from .storage import Store, StoreError
 MAX_JSON_BYTES = 1_000_000
 MAX_DOCUMENT_BYTES = 25_000_000
 SENT_FILE = object()
+UI_ROOT = Path(__file__).resolve().parent.parent / "poker-roots-boceto" / "poker-roots"
+UI_ASSETS = {f"drawn-{index}.jpg" for index in range(4)}
 
 
 class PokerRootsServer(ThreadingHTTPServer):
@@ -136,6 +138,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def _route(self, method: str, parts: list[str]):
         store = self.server.store
+        if method == "GET":
+            static = {(): "index.html", ("app.js",): "app.js", ("styles.css",): "styles.css"}
+            name = static.get(tuple(parts))
+            if name:
+                self._file(UI_ROOT / name, name, "inline")
+                return SENT_FILE
+            if len(parts) == 2 and parts[0] == "assets" and parts[1] in UI_ASSETS:
+                self._file(UI_ROOT / "assets" / parts[1], parts[1], "inline")
+                return SENT_FILE
         if parts == ["api", "health"] and method == "GET":
             return {"status": "ok", "database_version": 3, "model_configured": self.server.imports.model.configured}
         if parts == ["api", "search"] and method == "POST":

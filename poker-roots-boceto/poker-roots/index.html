@@ -1,1 +1,62 @@
-<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Poker Roots · El mapa de tu juego</title><link rel="stylesheet" href="styles.css"></head><body><div class="background" id="background"></div><header><div class="brand"><span>♠</span> POKER ROOTS<small>EL MAPA DE TU JUEGO</small></div><nav><b>Árbol de teoría</b><span>Del barrio al Royal Privé</span></nav><span class="version">BOCETO · 04</span></header><div class="layout"><aside><div class="eyebrow">Cuatro escenarios</div><div class="side-heading">Tu juego<br>echa raíces.</div><div id="venues" style="display:contents"></div><div class="side-note"><b>De la primera mesa<br>al salón más exclusivo.</b><br><br>Explora las fichas para profundizar en la teoría. Cada nivel te lleva a un nuevo lugar.<br><br>Todos los niveles están disponibles en este boceto.</div></aside><main class="main"><div class="heading"><div><div class="eyebrow">CONSTRUYE TU CONOCIMIENTO</div><h1>Cada decisión tiene una raíz.</h1><div class="subtitle">Un mapa de situaciones. Un camino hacia un juego más completo.</div></div><div class="small-hint">♢ &nbsp; EXPLORACIÓN LIBRE</div></div><section class="scene-title"><div class="scene-number" id="sceneNumber">01</div><div><h2 id="sceneTitle"></h2><p id="sceneText"></p></div></section><section class="map-shell"><div class="map-toolbar"><span>♧ &nbsp; El árbol de tu juego</span><button onclick="selectNode('poker')">↺ Volver a la raíz</button></div><div class="map-scroll"><div class="tree" id="tree"><svg class="wires" viewBox="0 0 800 590" preserveAspectRatio="none" aria-hidden="true" id="wires"></svg></div></div><div class="map-footer"><span>◉ Selecciona una ficha para explorar</span><span>Fichas tenues: temas por explorar · desliza en móvil →</span></div></section><section class="detail" aria-live="polite"><div><div class="eyebrow" id="path"></div><h3 id="detailTitle">Póker</h3><p id="detailText"></p></div><span class="suit">♠</span></section><div class="illustration-note">Concepto visual · ilustraciones y teoría de ejemplo</div></main></div><div class="scene-caption">ESCENARIO ACTUAL<strong id="caption"></strong></div><script src="app.js" defer></script></body></html>
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Poker Roots · El mapa de tu juego</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="background" id="background" aria-hidden="true"></div>
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="Poker Roots, volver a la raíz"><span class="brand-suit">♠</span> POKER ROOTS <small>EL MAPA DE TU JUEGO</small></a>
+    <div class="header-center"><strong>Árbol de teoría</strong><span>Tu biblioteca, conectada</span></div>
+    <span class="local-badge">BIBLIOTECA LOCAL</span>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar" aria-label="Escenarios del mapa">
+      <div class="eyebrow">CUATRO ESCENARIOS</div>
+      <p class="side-heading">Tu juego<br>echa raíces.</p>
+      <div class="venues" id="venues"></div>
+      <div class="side-note">Los escenarios acompañan la profundidad del mapa. La dificultad y los prerrequisitos de cada tema proceden de tu biblioteca guardada.</div>
+    </aside>
+
+    <main class="main">
+      <div class="heading">
+        <div class="eyebrow">EXPLORA TU CONOCIMIENTO</div>
+        <h1>Cada decisión tiene una raíz.</h1>
+        <p>Ramas, temas y relaciones que has guardado en tu biblioteca.</p>
+      </div>
+
+      <section class="scene-title" aria-label="Escenario actual">
+        <span class="scene-number" id="sceneNumber">01</span>
+        <div><h2 id="sceneTitle">La timba del barrio</h2><p id="sceneText"></p></div>
+      </section>
+
+      <section class="map-shell" aria-label="Árbol de temas">
+        <div class="map-toolbar">
+          <div><span class="toolbar-icon">♧</span><span>El árbol de tu juego</span><small id="treeCount"></small></div>
+          <div class="toolbar-actions">
+            <button type="button" id="rootButton">↶ Raíz</button>
+            <button type="button" id="reloadButton">↻ Actualizar</button>
+          </div>
+        </div>
+        <div class="tree-region" id="treeRegion" aria-live="polite">
+          <div class="tree-message" role="status">Cargando tu biblioteca…</div>
+        </div>
+        <div class="map-footer"><span>Selecciona una ficha para explorar</span><span>Los temas repetidos en ramas comparten un único registro</span></div>
+      </section>
+
+      <section class="detail" id="detail" aria-live="polite" aria-label="Tema seleccionado">
+        <div class="detail-head"><div><div class="eyebrow" id="path">TU BIBLIOTECA</div><h3 id="detailTitle">Elige una ficha</h3></div><span class="detail-suit" aria-hidden="true">♠</span></div>
+        <p class="detail-summary" id="detailText">Explora los temas y sus ubicaciones en el mapa.</p>
+        <div class="detail-meta" id="detailMeta"></div>
+        <div class="detail-links" id="detailLinks"></div>
+      </section>
+      <p class="illustration-note">Las escenas son ilustraciones de navegación. El contenido de teoría procede únicamente de la biblioteca local.</p>
+    </main>
+  </div>
+</body>
+</html>

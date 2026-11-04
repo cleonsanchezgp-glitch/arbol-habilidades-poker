@@ -1,37 +1,280 @@
-
-const environments=[['La timba del barrio','Fundamentos','Grafitis, bebidas y una mesa improvisada. Todo empieza con las primeras decisiones.'],['Casino de barrio','Estrategia','Fluorescentes, decoración barata y una corbata floja. Tu juego empieza a tener estructura.'],['Gran casino','Juego avanzado','Luz cálida, madera noble y gente bien vestida. Cada detalle tiene un propósito.'],['Royal Privé','Máxima precisión','Alfombras rojas, mármol y lámparas de cristal. La teoría llega al salón más exclusivo.']];let currentLevel=0;
-const nodes=[
-{id:'poker',label:'Póker',symbol:'♠',x:400,y:65,type:'root',level:0,text:'Todo tu conocimiento conectado en un solo mapa. Empieza por una calle y sigue sus ramas para concretar situaciones, conceptos y decisiones.'},
-{id:'flop',parent:'poker',label:'Flop',symbol:'▯▯▯',x:145,y:200,type:'street',level:0,text:'Las primeras tres cartas comunes abren el juego postflop. Organiza aquí texturas, rangos y decisiones de apuesta.'},
-{id:'turn',parent:'poker',label:'Turn',symbol:'▯',x:400,y:200,type:'street',level:0,text:'La cuarta carta modifica las posibilidades del board. Explora la equidad, los segundos barrels y los cambios de rango.'},
-{id:'river',parent:'poker',label:'River',symbol:'▯',x:655,y:200,type:'street',level:0,text:'La última carta define el board. Profundiza en valor, faroles y decisiones frente a una apuesta.'},
-{id:'rangos',parent:'flop',label:'Rangos',symbol:'▥',x:78,y:325,type:'topic',level:1,text:'Compara los rangos que llegan al flop. La posición y la acción preflop determinan qué manos puede representar cada jugador.'},
-{id:'texturas',parent:'flop',label:'Texturas',symbol:'♢',x:212,y:325,type:'topic',level:1,text:'Clasifica el board por conectividad, palos y altura. Desde aquí puedes separar boards secos, coordinados, doblados y monocolor.'},
-{id:'barrel',parent:'turn',label:'Segundo barrel',symbol:'▤',x:333,y:325,type:'topic',level:1,text:'Organiza los motivos para volver a apostar en turn: valor, protección o semifarol. El runout y la respuesta rival cambian la decisión.'},
-{id:'equidad',parent:'turn',label:'Equidad',symbol:'⚖',x:467,y:325,type:'topic',level:1,text:'Estudia cómo cambia la fuerza de una mano frente al rango rival y qué proyectos conservan opciones de mejora.'},
-{id:'faroles',parent:'river',label:'Faroles',symbol:'♧',x:588,y:325,type:'topic',level:1,text:'Explora la selección de candidatos de farol: valor de showdown, bloqueadores y manos que el rival podría abandonar.'},
-{id:'valor',parent:'river',label:'Valor',symbol:'♢',x:722,y:325,type:'topic',level:1,text:'Distingue valor fino y valor fuerte, y vincula los tamaños de apuesta con los rangos que pueden pagar.'},
-{id:'ventaja',parent:'rangos',label:'Ventaja de rango',symbol:'♟',x:55,y:440,type:'small',level:2,text:'Compara cómo conecta cada rango con una textura concreta. Esta ficha puede reunir ejemplos de posiciones y boards.'},
-{id:'nuts',parent:'rangos',label:'Ventaja de nuts',symbol:'♔',x:112,y:440,type:'small',level:2,muted:true,text:'Qué jugador concentra las combinaciones más fuertes. Tema por desarrollar en tu biblioteca.'},
-{id:'secos',parent:'texturas',label:'Boards secos',symbol:'▱',x:185,y:440,type:'small',level:2,text:'Ejemplo de rama específica: boards con pocos proyectos. Añade aquí manos comentadas y criterios para distinguir situaciones.'},
-{id:'conectados',parent:'texturas',label:'Conectados',symbol:'♧',x:242,y:440,type:'small',level:2,muted:true,text:'Boards con más conexiones y proyectos. Tema disponible para desarrollar.'},
-{id:'semifarol',parent:'barrel',label:'Semifaroles',symbol:'◎',x:306,y:440,type:'small',level:2,text:'Conecta proyectos, capacidad de mejora y fold equity al construir el rango que apuesta en turn.'},
-{id:'sizes',parent:'barrel',label:'Tamaños',symbol:'▥',x:363,y:440,type:'small',level:2,muted:true,text:'Una rama para comparar tamaños según el board, los rangos y los objetivos de la apuesta.'},
-{id:'realizacion',parent:'equidad',label:'Realización',symbol:'◔',x:440,y:440,type:'small',level:2,text:'La equidad disponible y la que una mano consigue realizar pueden diferir según la posición y la acción.'},
-{id:'odds',parent:'equidad',label:'Pot odds',symbol:'%',x:497,y:440,type:'small',level:2,muted:true,text:'Conecta el coste de pagar con el bote y las posibilidades de ganar.'},
-{id:'blockers',parent:'faroles',label:'Bloqueadores',symbol:'◈',x:563,y:440,type:'small',level:2,text:'Estudia qué combinaciones retira tu mano del rango rival y cómo afecta eso a sus calls y folds.'},
-{id:'frecuencia',parent:'faroles',label:'Frecuencias',symbol:'◷',x:620,y:440,type:'small',level:2,muted:true,text:'Una rama para estudiar las frecuencias de apuesta según el tamaño y los supuestos del modelo.'},
-{id:'fino',parent:'valor',label:'Valor fino',symbol:'♜',x:694,y:440,type:'small',level:2,text:'Examina situaciones donde manos peores todavía pueden pagar. Añade ejemplos de rangos y perfiles rivales.'},
-{id:'overbet',parent:'valor',label:'Overbets',symbol:'♢',x:751,y:440,type:'small',level:2,muted:true,text:'Profundiza en apuestas superiores al bote y en la construcción de rangos polarizados.'},
-{id:'rangos-precisos',parent:'ventaja',label:'Rangos por posición',symbol:'▦',x:55,y:545,type:'small',level:3,text:'Nivel de máxima concreción: una posición, un rango rival y un board específico. Aquí encajan tus tablas y análisis detallados.'},
-{id:'runouts',parent:'secos',label:'Runouts',symbol:'♠',x:185,y:545,type:'small',level:3,text:'Conecta una textura de flop con distintas cartas de turn y river, conservando el contexto de la mano.'},
-{id:'seleccion',parent:'semifarol',label:'Selección de combos',symbol:'↗',x:306,y:545,type:'small',level:3,text:'Baja de la idea general a las combinaciones concretas. Puedes añadir aquí ejemplos y excepciones a tus reglas.'},
-{id:'modelo',parent:'realizacion',label:'Modelos de rango',symbol:'%',x:440,y:545,type:'small',level:3,text:'Desarrolla un análisis concreto bajo supuestos explícitos sobre los rangos y la estrategia del rival.'},
-{id:'desbloquear',parent:'blockers',label:'Desbloquear folds',symbol:'♧',x:563,y:545,type:'small',level:3,text:'Analiza qué manos quieres que el rival conserve para poder abandonar frente a tu farol.'},
-{id:'polarizar',parent:'fino',label:'Polarización',symbol:'♜',x:694,y:545,type:'small',level:3,text:'Conecta valor, faroles y tamaño de apuesta en un escenario específico. Es el extremo más profundo de esta rama de ejemplo.'}
+const scenes = [
+  { title: 'La timba del barrio', subtitle: 'El origen', text: 'La raíz de tu biblioteca y sus primeras ramas.' },
+  { title: 'Casino de barrio', subtitle: 'Las ramas', text: 'Cada rama organiza una forma de recorrer tus temas.' },
+  { title: 'Gran casino', subtitle: 'Los temas', text: 'Abre un tema para ver sus relaciones y volver a su lugar en el mapa.' },
+  { title: 'Royal Privé', subtitle: 'Más profundidad', text: 'Las ramas más profundas conservan las mismas fuentes y relaciones.' },
 ];
-function setLevel(n){currentLevel=n;document.querySelector('#background').style.backgroundImage=`url(assets/drawn-${n}.jpg)`;document.querySelectorAll('.venue').forEach((e,i)=>e.classList.toggle('active',i===n));document.querySelector('#sceneNumber').textContent='0'+(n+1);document.querySelector('#sceneTitle').textContent=environments[n][0];document.querySelector('#sceneText').textContent=environments[n][2];document.querySelector('#caption').textContent=environments[n][0]}
-function selectNode(id){const n=nodes.find(n=>n.id===id);setLevel(n.level);document.querySelectorAll('.chip-node').forEach(e=>{e.classList.toggle('selected',e.dataset.id===id);e.setAttribute('aria-pressed',e.dataset.id===id?'true':'false')});const path=[];let a=n;while(a){path.unshift(a.label);a=nodes.find(p=>p.id===a.parent)}document.querySelector('#path').textContent=path.join(' / ');document.querySelector('#detailTitle').textContent=n.label;document.querySelector('#detailText').textContent=n.text}
-document.querySelector('#venues').innerHTML=environments.map((e,i)=>`<button class="venue" style="--thumb:url(assets/drawn-${i}.jpg)" onclick="setLevel(${i})"><small>NIVEL 0${i+1}</small><strong>${e[0]}</strong><em>${e[1]}</em></button>`).join('');
-document.querySelector('#wires').innerHTML=nodes.filter(n=>n.parent).map(n=>{const p=nodes.find(p=>p.id===n.parent);return `<line class="wire ${n.muted?'dim':''}" x1="${p.x}" y1="${p.y}" x2="${n.x}" y2="${n.y}"/>`}).join('');
-const tree=document.querySelector('#tree');nodes.forEach(n=>{const b=document.createElement('button');b.className=`chip-node ${n.type} ${n.muted?'muted':''}`;b.dataset.id=n.id;b.style.left=(n.x/8)+'%';b.style.top=(n.y/5.9)+'%';b.setAttribute('aria-label',n.label);b.title=n.label;b.innerHTML=`<span class="chip-inner">${n.type==='root'||n.type==='street'?`<span class="chip-title">${n.label.toUpperCase()}</span>`:''}<span class="symbol">${n.symbol}</span></span>${n.type==='topic'||n.type==='small'?`<span class="chip-label">${n.label}</span>`:''}`;b.onclick=()=>selectNode(n.id);tree.append(b)});selectNode('poker');
+
+const state = { branches: [], topics: [], selected: { kind: 'root' }, selectionVersion: 0 };
+const region = document.querySelector('#treeRegion');
+const reloadButton = document.querySelector('#reloadButton');
+const venues = document.querySelector('#venues');
+
+function element(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function setScene(depth) {
+  const index = Math.max(0, Math.min(3, depth));
+  const scene = scenes[index];
+  document.querySelector('#background').style.backgroundImage = `url('/assets/drawn-${index}.jpg')`;
+  document.querySelector('#sceneNumber').textContent = `0${index + 1}`;
+  document.querySelector('#sceneTitle').textContent = scene.title;
+  document.querySelector('#sceneText').textContent = scene.text;
+  [...venues.children].forEach((venue, position) => venue.classList.toggle('active', position === index));
+}
+
+function renderVenues() {
+  scenes.forEach((scene, index) => {
+    const venue = element('div', 'venue');
+    venue.style.setProperty('--thumb', `url('/assets/drawn-${index}.jpg')`);
+    venue.append(element('small', '', `ESCENARIO 0${index + 1}`),
+      element('strong', '', scene.title), element('span', '', scene.subtitle));
+    venues.append(venue);
+  });
+}
+
+function message(text, action) {
+  const box = element('div', 'tree-message');
+  box.setAttribute('role', 'status');
+  box.append(element('p', '', text));
+  if (action) {
+    const button = element('button', 'text-button', 'Reintentar');
+    button.type = 'button';
+    button.addEventListener('click', action);
+    box.append(button);
+  }
+  region.replaceChildren(box);
+}
+
+function nodeButton(label, symbol, kind, depth, onClick) {
+  const button = element('button', `chip-node ${kind}`);
+  button.type = 'button';
+  button.setAttribute('aria-label', label);
+  button.append(element('span', 'chip-symbol', symbol), element('span', 'chip-title', label));
+  button.addEventListener('click', onClick);
+  button.dataset.depth = String(depth);
+  return button;
+}
+
+function branchDepth(branchId) {
+  let depth = 1;
+  let current = state.branches.find(branch => branch.id === branchId);
+  while (current && current.parent_id) {
+    depth += 1;
+    current = state.branches.find(branch => branch.id === current.parent_id);
+  }
+  return depth;
+}
+
+function renderTree() {
+  const branches = state.branches;
+  const topics = state.topics;
+  const children = new Map();
+  const topicsByBranch = new Map();
+  const knownBranches = new Set(branches.map(branch => branch.id));
+  const sortBranches = (left, right) => (left.sort_order - right.sort_order) || left.name.localeCompare(right.name, 'es');
+  branches.forEach(branch => {
+    const parent = branch.parent_id && knownBranches.has(branch.parent_id) ? branch.parent_id : 'root';
+    if (!children.has(parent)) children.set(parent, []);
+    children.get(parent).push(branch);
+  });
+  children.forEach(group => group.sort(sortBranches));
+  topics.forEach(topic => {
+    const placements = topic.placements.filter(id => knownBranches.has(id));
+    for (const branchId of placements.length ? placements : ['unplaced']) {
+      if (!topicsByBranch.has(branchId)) topicsByBranch.set(branchId, []);
+      topicsByBranch.get(branchId).push(topic);
+    }
+  });
+
+  const tree = element('div', 'tree-content');
+  const root = nodeButton('Tu biblioteca', '♠', 'root', 0, () => selectRoot());
+  root.dataset.kind = 'root';
+  tree.append(root);
+
+  function makeTopic(topic, branchId, depth) {
+    const item = element('li', 'tree-item topic-item');
+    const button = nodeButton(topic.title, '♠', 'topic', depth, () => selectTopic(topic.id, branchId));
+    button.dataset.topicId = topic.id;
+    button.dataset.branchId = branchId;
+    button.append(element('span', 'chip-badge', topic.difficulty));
+    item.append(button);
+    return item;
+  }
+
+  function makeBranch(branch, depth) {
+    const item = element('li', 'tree-item branch-item');
+    const button = nodeButton(branch.name, '♧', 'branch', depth, () => selectBranch(branch.id));
+    button.dataset.branchId = branch.id;
+    button.dataset.kind = 'branch';
+    item.append(button);
+    const descendants = element('ul', 'tree-children');
+    for (const topic of topicsByBranch.get(branch.id) || []) descendants.append(makeTopic(topic, branch.id, depth + 1));
+    for (const child of children.get(branch.id) || []) descendants.append(makeBranch(child, depth + 1));
+    if (descendants.children.length) item.append(descendants);
+    return item;
+  }
+
+  const roots = element('ul', 'tree-children tree-first-level');
+  for (const branch of children.get('root') || []) roots.append(makeBranch(branch, 1));
+  if (topicsByBranch.has('unplaced')) {
+    const unplaced = element('li', 'tree-item branch-item');
+    const label = element('div', 'unplaced-heading', 'Sin rama asignada');
+    unplaced.append(label);
+    const group = element('ul', 'tree-children');
+    for (const topic of topicsByBranch.get('unplaced')) group.append(makeTopic(topic, 'unplaced', 1));
+    unplaced.append(group);
+    roots.append(unplaced);
+  }
+  if (roots.children.length) tree.append(roots);
+  if (!topics.length) {
+    const empty = element('div', 'empty-state');
+    empty.append(element('strong', '', 'Tu biblioteca aún no tiene temas.'),
+      element('p', '', 'Importa un documento para empezar a construir el mapa.'));
+    tree.append(empty);
+  }
+  region.replaceChildren(tree);
+  document.querySelector('#treeCount').textContent = `${branches.length} ramas · ${topics.length} temas`;
+}
+
+function markSelected() {
+  region.querySelectorAll('.chip-node').forEach(button => {
+    const { kind, topicId, branchId } = button.dataset;
+    const selected = (kind === 'root' && state.selected.kind === 'root') ||
+      (kind === 'branch' && state.selected.kind === 'branch' && branchId === state.selected.id) ||
+      (topicId && state.selected.kind === 'topic' && topicId === state.selected.id && branchId === state.selected.branchId);
+    button.classList.toggle('selected', Boolean(selected));
+    button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+  });
+}
+
+function detailBase(path, title, description, depth) {
+  document.querySelector('#path').textContent = path;
+  document.querySelector('#detailTitle').textContent = title;
+  document.querySelector('#detailText').textContent = description;
+  document.querySelector('#detailMeta').replaceChildren();
+  document.querySelector('#detailLinks').replaceChildren();
+  setScene(depth);
+  markSelected();
+}
+
+function selectRoot() {
+  state.selectionVersion += 1;
+  state.selected = { kind: 'root' };
+  detailBase('TU BIBLIOTECA', 'Tu juego echa raíces',
+    state.topics.length ? 'Elige una rama o un tema para recorrer tu biblioteca guardada.' :
+      'Aún no hay temas en el mapa. Importa un documento para comenzar.', 0);
+}
+
+function selectBranch(branchId) {
+  const branch = state.branches.find(item => item.id === branchId);
+  if (!branch) return;
+  state.selectionVersion += 1;
+  state.selected = { kind: 'branch', id: branchId };
+  const direct = state.topics.filter(topic => topic.placements.includes(branchId)).length;
+  detailBase('RAMA DEL ÁRBOL', branch.name,
+    direct ? `${direct} ${direct === 1 ? 'tema aparece' : 'temas aparecen'} directamente en esta rama.` :
+      'Esta rama aún no tiene temas asignados directamente.', branchDepth(branchId));
+}
+
+function linkButton(text, onClick) {
+  const button = element('button', 'relation-link', text);
+  button.type = 'button';
+  button.addEventListener('click', onClick);
+  return button;
+}
+
+function focusTopic(topicId, branchId) {
+  const topic = state.topics.find(item => item.id === topicId);
+  if (!topic) return;
+  const placement = branchId || topic.placements[0] || 'unplaced';
+  selectTopic(topicId, placement);
+  const button = [...region.querySelectorAll('[data-topic-id]')]
+    .find(item => item.dataset.topicId === topicId && item.dataset.branchId === placement);
+  button?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  button?.focus({ preventScroll: true });
+}
+
+async function selectTopic(topicId, branchId) {
+  const topic = state.topics.find(item => item.id === topicId);
+  if (!topic) return;
+  const version = ++state.selectionVersion;
+  state.selected = { kind: 'topic', id: topicId, branchId };
+  detailBase('TEMA GUARDADO', topic.title,
+    topic.summary || topic.explanation || 'Este tema aún no tiene resumen.',
+    branchId === 'unplaced' ? 1 : branchDepth(branchId) + 1);
+
+  const meta = document.querySelector('#detailMeta');
+  meta.append(element('span', 'meta-pill', `Dificultad: ${topic.difficulty}`),
+    element('span', 'meta-pill', `Revisión: ${topic.review_status}`));
+  if (topic.conditions) meta.append(element('p', 'condition', `Condiciones: ${topic.conditions}`));
+
+  const links = document.querySelector('#detailLinks');
+  if (topic.prerequisites.length) {
+    const group = element('div', 'relation-group');
+    group.append(element('strong', '', 'Antes de este tema'));
+    for (const prerequisiteId of topic.prerequisites) {
+      const prerequisite = state.topics.find(item => item.id === prerequisiteId);
+      if (prerequisite) group.append(linkButton(prerequisite.title, () => focusTopic(prerequisiteId)));
+    }
+    links.append(group);
+  }
+
+  const locationGroup = element('div', 'relation-group');
+  locationGroup.append(element('strong', '', 'Volver a su lugar en el mapa'));
+  links.append(locationGroup);
+  if (branchId === 'unplaced') locationGroup.append(element('span', 'subtle', 'Este tema no tiene rama asignada.'));
+  try {
+    const response = await fetch(`/api/topics/${encodeURIComponent(topicId)}/locations`, { cache: 'no-store' });
+    if (!response.ok) throw new Error('No se pudieron cargar las ubicaciones.');
+    const data = await response.json();
+    if (version !== state.selectionVersion) return;
+    for (const location of data.locations) {
+      const label = location.path.map(part => part.name).join(' / ');
+      locationGroup.append(linkButton(label, () => focusTopic(topicId, location.branch_id)));
+    }
+  } catch {
+    if (version === state.selectionVersion) locationGroup.append(element('span', 'subtle', 'No se pudieron cargar las ubicaciones. Actualiza el árbol.'));
+  }
+}
+
+async function loadTree() {
+  reloadButton.disabled = true;
+  message('Cargando tu biblioteca…');
+  try {
+    const response = await fetch('/api/tree', { cache: 'no-store' });
+    if (!response.ok) throw new Error('No se pudo cargar el árbol.');
+    const data = await response.json();
+    if (!Array.isArray(data.branches) || !Array.isArray(data.topics)) throw new Error('El árbol recibido no es válido.');
+    state.branches = data.branches;
+    state.topics = data.topics;
+    renderTree();
+    const prior = state.selected;
+    if (prior.kind === 'topic' && state.topics.some(topic => topic.id === prior.id)) {
+      const topic = state.topics.find(item => item.id === prior.id);
+      selectTopic(prior.id, topic.placements.includes(prior.branchId) ? prior.branchId : topic.placements[0] || 'unplaced');
+    } else if (prior.kind === 'branch' && state.branches.some(branch => branch.id === prior.id)) {
+      selectBranch(prior.id);
+    } else {
+      selectRoot();
+    }
+  } catch {
+    message('No se pudo cargar la biblioteca local. Comprueba que el servidor esté disponible.', loadTree);
+    document.querySelector('#treeCount').textContent = 'Sin conexión';
+    state.selectionVersion += 1;
+    state.selected = { kind: 'root' };
+    detailBase('SIN CONEXIÓN', 'No se pudo abrir el mapa',
+      'Vuelve a intentarlo cuando la biblioteca local esté disponible.', 0);
+  } finally {
+    reloadButton.disabled = false;
+  }
+}
+
+renderVenues();
+document.querySelector('#rootButton').addEventListener('click', selectRoot);
+reloadButton.addEventListener('click', loadTree);
+loadTree();
