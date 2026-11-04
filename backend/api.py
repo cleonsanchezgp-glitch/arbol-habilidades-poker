@@ -8,7 +8,7 @@ import mimetypes
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from .imports import ImportService
 from .local_model import LocalModel, ModelUnavailable
@@ -139,7 +139,7 @@ class Handler(BaseHTTPRequestHandler):
     def _route(self, method: str, parts: list[str]):
         store = self.server.store
         if method == "GET":
-            static = {(): "index.html", ("app.js",): "app.js", ("styles.css",): "styles.css"}
+            static = {(): "index.html", ("app.js",): "app.js", ("workspace.js",): "workspace.js", ("styles.css",): "styles.css"}
             name = static.get(tuple(parts))
             if name:
                 self._file(UI_ROOT / name, name, "inline")
@@ -163,7 +163,7 @@ class Handler(BaseHTTPRequestHandler):
             if method == "GET":
                 return {"documents": store.list_documents()}
             if method == "POST":
-                filename = self.headers.get("X-Filename", "")
+                filename = unquote(self.headers.get("X-Filename", ""))
                 if not filename:
                     raise StoreError("X-Filename is required")
                 document, created = self.server.imports.submit(filename, self._body(MAX_DOCUMENT_BYTES))

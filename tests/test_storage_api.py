@@ -234,11 +234,16 @@ class ApiTests(unittest.TestCase):
         with urlopen(self.base + "/", timeout=5) as response:
             page = response.read().decode("utf-8")
             self.assertIn("id=\"treeRegion\"", page)
+            self.assertIn("id=\"workspaceBody\"", page)
             self.assertIn("text/html", response.headers["Content-Type"])
         with urlopen(self.base + "/app.js", timeout=5) as response:
             script = response.read().decode("utf-8")
             self.assertIn("fetch('/api/tree'", script)
             self.assertNotIn("const nodes=[", script)
+        with urlopen(self.base + "/workspace.js", timeout=5) as response:
+            script = response.read().decode("utf-8")
+            self.assertIn("/api/study-path", script)
+            self.assertIn("/api/search", script)
         with urlopen(self.base + "/assets/drawn-0.jpg", timeout=5) as response:
             self.assertEqual(response.headers["Content-Type"], "image/jpeg")
         with self.assertRaises(HTTPError) as error:

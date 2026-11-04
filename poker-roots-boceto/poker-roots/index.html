@@ -6,6 +6,7 @@
   <title>Poker Roots · El mapa de tu juego</title>
   <link rel="stylesheet" href="/styles.css">
   <script src="/app.js" defer></script>
+  <script src="/workspace.js" defer></script>
 </head>
 <body>
   <div class="background" id="background" aria-hidden="true"></div>
@@ -49,6 +50,17 @@
         <div class="map-footer"><span>Selecciona una ficha para explorar</span><span>Los temas repetidos en ramas comparten un único registro</span></div>
       </section>
 
+      <section class="workspace" aria-label="Herramientas de biblioteca">
+        <div class="workspace-tabs" role="tablist" aria-label="Herramientas">
+          <button type="button" role="tab" data-view="import" aria-selected="true">Importar</button>
+          <button type="button" role="tab" data-view="reader" aria-selected="false">Leer y editar</button>
+          <button type="button" role="tab" data-view="sources" aria-selected="false">Fuentes</button>
+          <button type="button" role="tab" data-view="search" aria-selected="false">Buscar</button>
+          <button type="button" role="tab" data-view="study" aria-selected="false">Estudiar</button>
+          <button type="button" role="tab" data-view="duplicates" aria-selected="false">Similares</button>
+        </div>
+        <div class="workspace-body" id="workspaceBody" role="tabpanel" aria-live="polite"></div>
+      </section>
       <section class="detail" id="detail" aria-live="polite" aria-label="Tema seleccionado">
         <div class="detail-head"><div><div class="eyebrow" id="path">TU BIBLIOTECA</div><h3 id="detailTitle">Elige una ficha</h3></div><span class="detail-suit" aria-hidden="true">♠</span></div>
         <p class="detail-summary" id="detailText">Explora los temas y sus ubicaciones en el mapa.</p>

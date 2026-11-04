@@ -1,10 +1,10 @@
 # Poker Roots — Texas Hold'em study library
 
-Local application in progress for organizing user-imported Texas Hold'em theory. The supplied illustrations and visual direction live in `poker-roots-boceto/poker-roots/`; its running tree now reads the local API instead of example theory. Project scope, architecture, and planned work are in `_context/`.
+Local application in progress for organizing user-imported Texas Hold'em theory. The supplied illustrations and visual direction live in `poker-roots-boceto/poker-roots/`; the browser now offers import, topic reading and editing, source inspection, search, study paths, and similarity review alongside the saved tree. Project scope, architecture, and planned work are in `_context/`.
 
 ## Current executable foundation
 
-WP-001 provides a durable SQLite store and a loopback HTTP API using Python's standard library. WP-002 adds DOCX validation and background extraction. WP-003 adds source-linked topic proposals through a locally configured Ollama-compatible text model. WP-005 adds a local FTS5 index, background embeddings when a local embedding model is configured, source-linked search, and prerequisite-ordered study paths. The visual tree now renders saved branches, topics, placements, and prerequisites. The application stores original document bytes, ordered source fragments, extractable images, topics, evidence links, strategic facets, branches, placements, and acyclic prerequisite relations. Data survives process restarts. Import, editing, search, and study views in the browser remain planned.
+WP-001 provides a durable SQLite store and a loopback HTTP API using Python's standard library. WP-002 adds DOCX validation and background extraction. WP-003 adds source-linked topic proposals through a locally configured Ollama-compatible text model. WP-005 adds a local FTS5 index, background embeddings when a local embedding model is configured, source-linked search, and prerequisite-ordered study paths. The visual tree renders saved branches, topics, placements, and prerequisites; the browser views expose the existing API workflows. The application stores original document bytes, ordered source fragments, extractable images, topics, evidence links, strategic facets, branches, placements, and acyclic prerequisite relations. Data survives process restarts.
 
 Python 3.10 or newer is required. No package installation is needed for this foundation.
 
