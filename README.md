@@ -59,4 +59,6 @@ The upload endpoint validates the DOCX package and responds `202 Accepted` with 
 python -m unittest discover -s tests -v
 ```
 
+For the optional browser smoke check, install the development dependency with `npm install` and run `npm run test:ui`. It uses a local Edge installation on Windows (or set `POKER_ROOTS_BROWSER_PATH` to a Chromium-compatible executable), launches an isolated API with synthetic data, and checks desktop and 390px navigation, visible states, editing, search, a two-topic import, and immediate tree refresh. The fixture uses a simulated local model; this check does not establish the quality of answers from a real model.
+
 The tests use disposable data directories, synthetic DOCX packages, and simulated local models. They check extraction order, image access, invalid-file rejection, persistence after reopening the store, duplicate document hashes, atomic fragment writes, source-linked multi-topic proposals, numeric-detail rejection, cycle rejection, API error handling, FTS5 refresh and migration, local embedding calls, retry after embedding failure, semantic and lexical retrieval, clarification, insufficient coverage, source-reference validation, evidence-bounded prerequisite study paths, and same-origin serving of the visual tree.

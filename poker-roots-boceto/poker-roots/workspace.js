@@ -1,7 +1,8 @@
 // Browser workflows use the same local API as the tree. Saved text is inserted as text.
 const workspaceBody = document.querySelector('#workspaceBody');
 const workspaceTabs = [...document.querySelectorAll('[data-view]')];
-const workspace = { view: 'import', topicId: null, documentId: null, documents: [], timer: null, request: 0 };
+const workspace = { view: 'import', topicId: null, documentId: null, documents: [],
+  documentStates: new Map(), timer: null, request: 0 };
 
 function ui(tag, className = '', value) {
   const node = document.createElement(tag);
@@ -22,6 +23,18 @@ function heading(title, description) {
   workspaceBody.replaceChildren(ui('h3', '', title), ui('p', 'work-intro', description));
 }
 function errorText(error) { return error instanceof Error ? error.message : 'Error desconocido'; }
+const importStates = {
+  stored: 'Guardado', queued: 'En cola', extracting: 'Extrayendo',
+  extracted: 'Extraído', awaiting_model: 'Pendiente de modelo local',
+  analyzing: 'Analizando', completed: 'Completado', failed: 'Falló',
+};
+function importHelp(doc) {
+  if (doc.state === 'awaiting_model') return 'La extracción terminó. Configura POKER_ROOTS_MODEL, reinicia la API y pulsa Analizar.';
+  if (doc.state === 'failed') return 'La importación falló. Revisa el error y pulsa Reintentar.';
+  if (doc.state === 'completed') return 'Los temas están guardados y listos para revisar.';
+  if (['queued', 'extracting', 'analyzing'].includes(doc.state)) return 'Puedes seguir navegando mientras se procesa el documento.';
+  return '';
+}
 async function api(path, options) {
   const response = await fetch(path, { cache: 'no-store', ...options });
   const data = await response.json().catch(() => ({}));
@@ -75,6 +88,7 @@ async function renderImport() {
       const result = await api('/api/documents', { method: 'POST',
         headers: { 'X-Filename': encodeURIComponent(file.files[0].name) }, body: file.files[0] });
       workspace.documentId = result.document.id;
+      workspace.documentStates.set(result.document.id, result.document.state);
       feedback.replaceChildren(ui('p', 'work-note', result.created ? 'Importación iniciada.' : 'Este archivo ya estaba importado. Se muestra el registro existente.'));
       await loadDocuments();
     } catch (error) { feedback.replaceChildren(ui('p', 'work-note error', errorText(error))); }
@@ -86,12 +100,17 @@ async function renderImport() {
   async function loadDocuments() {
     try {
       workspace.documents = (await api('/api/documents')).documents;
+      const newlyCompleted = workspace.documents.some(doc => doc.state === 'completed' &&
+        workspace.documentStates.has(doc.id) && workspace.documentStates.get(doc.id) !== 'completed');
+      for (const doc of workspace.documents) workspace.documentStates.set(doc.id, doc.state);
+      if (newlyCompleted) await loadTree();
       list.replaceChildren();
       if (!workspace.documents.length) note(list, 'Todavía no hay documentos importados.');
       for (const doc of workspace.documents) {
         const card = ui('article', 'work-card');
-        const top = add(card, ui('strong', '', doc.filename), ui('span', 'work-status', doc.state));
-        if (doc.error) note(card, doc.error, 'error');
+        const top = add(card, ui('strong', '', doc.filename), ui('span', 'work-status', importStates[doc.state] || doc.state));
+        if (importHelp(doc)) note(card, importHelp(doc));
+        if (doc.error && doc.state !== 'awaiting_model') note(card, doc.error, 'error');
         for (const warning of doc.warnings || []) note(card, warning);
         const actions = ui('div', 'work-actions');
         card.append(actions);
@@ -289,15 +308,21 @@ function renderSearch() {
     event.preventDefault(); submit.disabled = true;
     result.replaceChildren(ui('p', 'work-note', 'Buscando en la biblioteca…'));
     try { showSearchResult(result, await post('/api/search', { query: query.value })); }
-    catch (error) { result.replaceChildren(ui('p', 'work-note error', errorText(error))); }
+    catch (error) {
+      const message = /POKER_ROOTS_MODEL|local model/i.test(errorText(error)) ?
+        'El modelo local no está disponible. Configura POKER_ROOTS_MODEL y vuelve a buscar.' :
+        `La búsqueda falló: ${errorText(error)}. Puedes volver a intentarlo.`;
+      result.replaceChildren(ui('p', 'work-note error', message));
+    }
     finally { submit.disabled = false; }
   });
 }
 function showSearchResult(area, data) {
   area.replaceChildren();
   if (data.status === 'answered') add(area, ui('h4', '', 'Respuesta con fuentes'), ui('p', 'work-answer', data.answer));
-  else if (data.status === 'clarification') note(area, data.question || 'La pregunta necesita una aclaración.');
-  else note(area, data.message || 'No hay evidencia suficiente para responder.');
+  else if (data.status === 'clarification') note(area, data.question || 'La pregunta necesita una aclaración. Añade la condición que falta y vuelve a buscar.');
+  else if (data.status === 'empty_index') note(area, 'Todavía no hay contenido indexado. Importa un DOCX para empezar a buscar.');
+  else note(area, 'No hay evidencia suficiente para responder con seguridad. Prueba otra consulta o importa una fuente que cubra el caso.');
   for (const warning of data.retrieval_warnings || []) note(area, warning);
   if (data.topics?.length) {
     area.append(ui('h4', '', 'Temas relacionados'));
@@ -326,10 +351,13 @@ function renderStudy() {
     try {
       const data = await post('/api/study-path', { goal: goal.value });
       result.replaceChildren();
-      if (!data.steps.length) note(result, 'No hay una ruta respaldada por fuentes para este objetivo.');
+      if (!data.steps.length) note(result, 'No hay una ruta respaldada por fuentes para este objetivo. Importa teoría relacionada o prueba un objetivo más concreto.');
       data.steps.forEach((step, index) => {
         const card = ui('article', 'work-card');
-        card.append(ui('strong', '', `${index + 1}. ${step.title}`), ui('p', '', step.reason), topicLink(step.topic_id, 'Abrir tema'));
+        const reason = step.reason === 'Matches the study goal' ? 'Coincide con el objetivo de estudio' :
+          step.reason === 'Available basic topic for a beginner path' ? 'Tema básico disponible' :
+          step.reason.startsWith('Prerequisite for ') ? `Prerrequisito de ${step.reason.slice(17)}` : step.reason;
+        card.append(ui('strong', '', `${index + 1}. ${step.title}`), ui('p', '', reason), topicLink(step.topic_id, 'Abrir tema'));
         for (const source of step.sources) card.append(documentLink(source.document_id, `Fuente · ${source.locator}`));
         result.append(card);
       });

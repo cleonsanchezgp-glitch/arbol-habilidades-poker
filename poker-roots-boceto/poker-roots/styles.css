@@ -83,6 +83,7 @@ h1 { margin: 11px 0 7px; font: normal clamp(28px, 4vw, 38px)/1.1 Georgia, 'Times
 .tree-message p { margin-bottom: 7px; }
 .map-footer { border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; line-height: 1.4; }
 .map-footer span:first-child { color: var(--gold); }
+.mobile-scroll-hint { display: none; }
 
 .detail { max-width: 910px; margin: 16px auto 0; padding: 22px 25px; border: 1px solid #d9bb7863; border-radius: 8px; background: var(--panel); backdrop-filter: blur(10px); }
 .detail-head { display: flex; align-items: start; justify-content: space-between; gap: 15px; }
@@ -155,7 +156,8 @@ h1 { margin: 11px 0 7px; font: normal clamp(28px, 4vw, 38px)/1.1 Georgia, 'Times
   .map-shell { min-width: 0; }
   .scene-title h2 { font-size: 20px; }
   .map-toolbar, .map-footer { padding: 11px 12px; }
-  .map-footer span:last-child { display: none; }
+  .map-footer span:first-child, .map-footer span:last-child { display: none; }
+  .map-footer .mobile-scroll-hint { display: inline; color: var(--gold); }
   .tree-region { padding: 18px 15px 28px; }
   .tree-children { margin-left: 13px; padding-left: 15px; }
   .tree-item::before { left: -15px; width: 12px; }
